@@ -1,0 +1,18 @@
+{
+  "id": "todo_list",
+  "name": "To-Do List",
+  "description": "Transform a conversation or ideas into a structured to-do list.",
+  "verbatim": false,
+  "source": "Reconstructed from Plaud community template 'To-Do List'.",
+  "outline": [
+    "Extract every actionable task mentioned or implied in the transcript.",
+    "Present tasks as a checklist using '- [ ] ' markdown checkboxes.",
+    "For each task, append the owner in parentheses if a responsible person is identifiable.",
+    "Append a due date in the form (due: <date/time>) when a deadline is stated.",
+    "Group tasks under short headings when there are clearly distinct workstreams.",
+    "Do not invent tasks that are not grounded in the transcript."
+  ],
+  "sections": [
+    "Tasks"
+  ]
+}

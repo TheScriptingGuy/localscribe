@@ -1,0 +1,19 @@
+{
+  "id": "key_points",
+  "name": "Key Points, Decisions, Tasks",
+  "description": "Extract the essentials: key points, decisions made, and tasks to do.",
+  "verbatim": false,
+  "source": "Reconstructed from Plaud community template 'Key Points, Decisions, Tasks'.",
+  "outline": [
+    "Extract and separate three things from the transcript: key points, decisions, and tasks.",
+    "List key points as concise bullets covering the substantive content.",
+    "List decisions that were explicitly made, each on its own line.",
+    "List tasks as a checklist with '- [ ] ', including owner and deadline when stated.",
+    "Keep it factual and grounded; omit a section entirely if nothing applies."
+  ],
+  "sections": [
+    "Key Points",
+    "Decisions",
+    "Tasks"
+  ]
+}

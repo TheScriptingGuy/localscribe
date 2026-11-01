@@ -1,0 +1,12 @@
+include: package:flutter_lints/flutter.yaml
+
+linter:
+  rules:
+    prefer_const_constructors: true
+    avoid_print: false
+
+analyzer:
+  errors:
+    # Keep CI builds unblocked on style-only issues during early phases.
+    deprecated_member_use: warning
+    unused_import: warning

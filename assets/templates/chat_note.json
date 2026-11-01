@@ -1,0 +1,21 @@
+{
+  "id": "chat_note",
+  "name": "Chat Note",
+  "description": "Casual conversation summary — the template Plaud auto-selects for informal talks.",
+  "verbatim": false,
+  "source": "Reconstructed from Plaud template id casual-conversation (name, AUTO-SELECT behaviour).",
+  "outline": [
+    "Summarize an informal conversation in a warm, readable way without inventing detail.",
+    "Open with a short overall summary of what the conversation was about.",
+    "Describe the mood/atmosphere of the conversation in one or two sentences.",
+    "Capture the main topics discussed as concise bullet points, in the order they came up.",
+    "List any concrete agreements, plans or next steps mentioned (omit the section if there were none).",
+    "Keep the tone natural and avoid corporate/meeting jargon."
+  ],
+  "sections": [
+    "Summary",
+    "Atmosphere",
+    "Topics",
+    "Agreements & Next Steps"
+  ]
+}

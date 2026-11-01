@@ -1,0 +1,50 @@
+name: localscribe
+description: Local-first voice recording, transcription and AI notes. No cloud lock-in.
+publish_to: "none"
+version: 0.1.0+1
+
+environment:
+  sdk: ">=3.3.0 <4.0.0"
+  flutter: ">=3.19.0"
+
+dependencies:
+  flutter:
+    sdk: flutter
+
+  # State / DI
+  provider: ^6.1.2
+
+  # Networking (remote AI API URLs)
+  dio: ^5.4.0
+
+  # Persistence
+  shared_preferences: ^2.2.2
+  path_provider: ^2.1.2
+  sqflite: ^2.3.2
+
+  # Audio
+  record: ^5.0.4
+  just_audio: ^0.9.36
+  file_picker: ^6.1.1
+
+  # BLE (Plaud device, Phase 5)
+  flutter_blue_plus: ^1.31.8
+
+  # Crypto (BLE handshake + general)
+  pointycastle: ^3.7.4
+  crypto: ^3.0.3
+  convert: ^3.1.1
+
+  # Misc
+  uuid: ^4.3.3
+  intl: ^0.19.0
+  http: ^1.2.0
+  path: ^1.9.0
+
+dev_dependencies:
+  flutter_lints: ^3.0.1
+
+flutter:
+  uses-material-design: true
+  assets:
+    - assets/templates/

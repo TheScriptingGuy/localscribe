@@ -1,0 +1,161 @@
+import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
+
+import '../models/ai_config.dart';
+import '../settings/settings.dart';
+
+/// Configure both AI pipelines: on-device model OR a custom API URL.
+class OptionsScreen extends StatefulWidget {
+  const OptionsScreen({super.key});
+
+  @override
+  State<OptionsScreen> createState() => _OptionsScreenState();
+}
+
+class _OptionsScreenState extends State<OptionsScreen> {
+  @override
+  Widget build(BuildContext context) {
+    final settings = context.watch<Settings>();
+    final t = settings.transcription;
+    final n = settings.noteAi;
+
+    return Scaffold(
+      appBar: AppBar(title: const Text('Options')),
+      body: ListView(
+        padding: const EdgeInsets.all(16),
+        children: [
+          _sectionTitle(context, 'Transcription AI'),
+          _modeToggle(
+            onDevice: t.onDevice,
+            onChanged: (v) {
+              t.onDevice = v;
+              settings.save();
+            },
+            onDeviceLabel: 'On-device (whisper.cpp) — Phase 3',
+          ),
+          if (!t.onDevice) ...[
+            _field('API base URL', t.remote.baseUrl,
+                hint: 'https://api.openai.com/v1',
+                onChanged: (v) => t.remote.baseUrl = v),
+            _field('API key', t.remote.apiKey,
+                obscure: true, onChanged: (v) => t.remote.apiKey = v),
+            _field('Model', t.remote.model,
+                hint: 'whisper-1', onChanged: (v) => t.remote.model = v),
+            const _Hint(
+                'OpenAI-compatible /audio/transcriptions. Works with OpenAI, '
+                'Groq, or a self-hosted whisper.cpp HTTP server.'),
+          ] else
+            const _Hint('Downloadable whisper models arrive in Phase 3.'),
+          const Divider(height: 40),
+          _sectionTitle(context, 'Note AI  &  Ask-AI chat'),
+          _modeToggle(
+            onDevice: n.onDevice,
+            onChanged: (v) {
+              n.onDevice = v;
+              settings.save();
+            },
+            onDeviceLabel: 'On-device (llama.cpp / GGUF) — Phase 4',
+          ),
+          if (!n.onDevice) ...[
+            DropdownButtonFormField<ChatApiFlavor>(
+              value: n.remote.flavor,
+              decoration: const InputDecoration(
+                  labelText: 'Provider', border: OutlineInputBorder()),
+              items: ChatApiFlavor.values
+                  .map((f) =>
+                      DropdownMenuItem(value: f, child: Text(f.label)))
+                  .toList(),
+              onChanged: (v) {
+                if (v == null) return;
+                setState(() => n.remote.flavor = v);
+                settings.save();
+              },
+            ),
+            const SizedBox(height: 12),
+            _field('API base URL', n.remote.baseUrl,
+                hint: n.remote.flavor == ChatApiFlavor.anthropic
+                    ? 'https://api.anthropic.com'
+                    : 'https://api.openai.com/v1',
+                onChanged: (v) => n.remote.baseUrl = v),
+            _field('API key', n.remote.apiKey,
+                obscure: true, onChanged: (v) => n.remote.apiKey = v),
+            _field('Model', n.remote.model,
+                hint: n.remote.flavor == ChatApiFlavor.anthropic
+                    ? 'claude-sonnet-4-5'
+                    : 'gpt-4o-mini',
+                onChanged: (v) => n.remote.model = v),
+            const _Hint(
+                'OpenAI-compatible also covers Ollama, LM Studio, llama.cpp '
+                'server, vLLM, OpenRouter, Groq — just change the base URL.'),
+          ] else
+            const _Hint('Downloadable GGUF models arrive in Phase 4.'),
+          const SizedBox(height: 24),
+          FilledButton.icon(
+            onPressed: () async {
+              await settings.save();
+              if (context.mounted) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(content: Text('Settings saved')));
+              }
+            },
+            icon: const Icon(Icons.save),
+            label: const Text('Save settings'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _sectionTitle(BuildContext context, String s) => Padding(
+        padding: const EdgeInsets.only(bottom: 8),
+        child: Text(s, style: Theme.of(context).textTheme.titleLarge),
+      );
+
+  Widget _modeToggle({
+    required bool onDevice,
+    required ValueChanged<bool> onChanged,
+    required String onDeviceLabel,
+  }) =>
+      SwitchListTile(
+        contentPadding: EdgeInsets.zero,
+        title: Text(onDevice ? onDeviceLabel : 'Custom API URL'),
+        subtitle: Text(onDevice
+            ? 'Run the model locally on the phone'
+            : 'Send to the API endpoint you configure'),
+        value: onDevice,
+        onChanged: onChanged,
+      );
+
+  Widget _field(String label, String initial,
+      {String? hint,
+      bool obscure = false,
+      required ValueChanged<String> onChanged}) {
+    return Padding(
+      padding: const EdgeInsets.only(top: 12),
+      child: TextFormField(
+        initialValue: initial,
+        obscureText: obscure,
+        decoration: InputDecoration(
+          labelText: label,
+          hintText: hint,
+          border: const OutlineInputBorder(),
+        ),
+        onChanged: onChanged,
+      ),
+    );
+  }
+}
+
+class _Hint extends StatelessWidget {
+  final String text;
+  const _Hint(this.text);
+  @override
+  Widget build(BuildContext context) => Padding(
+        padding: const EdgeInsets.only(top: 8),
+        child: Text(text,
+            style: Theme.of(context)
+                .textTheme
+                .bodySmall
+                ?.copyWith(color: Theme.of(context).colorScheme.outline)),
+      );
+}
