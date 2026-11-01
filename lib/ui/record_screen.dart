@@ -11,6 +11,7 @@ import '../services/audio/recording_service.dart';
 import '../services/library/recording_store.dart';
 import 'format.dart';
 import 'recording_detail_screen.dart';
+import 'theme.dart';
 
 /// Phone-mic recorder. Writes 16 kHz mono AAC: small enough for Whisper APIs
 /// (~22 MB/hour, under the common 25 MB upload cap) and enough for speech.
@@ -36,7 +37,9 @@ class _RecordScreenState extends State<RecordScreen> {
 
   bool _recording = false;
   bool _paused = false;
-  double _level = 0; // 0..1
+  /// Recent input levels (0..1), newest last, for the waveform.
+  final _levels = <double>[];
+  static const _maxLevels = 64;
   String? _error;
 
   @override
@@ -99,7 +102,11 @@ class _RecordScreenState extends State<RecordScreen> {
         .onAmplitudeChanged(const Duration(milliseconds: 120))
         .listen((a) {
       // dBFS (-60..0) -> 0..1 for the level meter.
-      setState(() => _level = ((a.current + 60) / 60).clamp(0.0, 1.0));
+      final level = ((a.current + 60) / 60).clamp(0.0, 1.0);
+      setState(() {
+        _levels.add(_paused ? 0 : level);
+        if (_levels.length > _maxLevels) _levels.removeAt(0);
+      });
     });
     setState(() {
       _recording = true;
@@ -163,36 +170,62 @@ class _RecordScreenState extends State<RecordScreen> {
         if (!didPop) _confirmDiscard();
       },
       child: Scaffold(
-        appBar: AppBar(title: const Text('Record')),
+        appBar: AppBar(),
         body: SafeArea(
           child: Padding(
-            padding: const EdgeInsets.all(24),
+            padding: const EdgeInsets.fromLTRB(24, 0, 24, 24),
             child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                const Spacer(),
-                Text(
-                  formatDuration(_elapsed.elapsed),
-                  style: Theme.of(context)
-                      .textTheme
-                      .displayMedium
-                      ?.copyWith(fontFeatures: const [FontFeature.tabularFigures()]),
-                ),
-                const SizedBox(height: 24),
-                ClipRRect(
-                  borderRadius: BorderRadius.circular(8),
-                  child: LinearProgressIndicator(
-                    value: _recording && !_paused ? _level : 0,
-                    minHeight: 12,
-                  ),
-                ),
-                const SizedBox(height: 12),
                 Text(
                   !_recording
-                      ? 'Ready'
+                      ? 'New recording'
                       : _paused
                           ? 'Paused'
-                          : 'Recording — continues with the screen off',
-                  style: TextStyle(color: scheme.outline),
+                          : 'Recording',
+                  style: Theme.of(context).textTheme.displaySmall,
+                ),
+                const SizedBox(height: 8),
+                Row(
+                  children: [
+                    if (_recording && !_paused) ...[
+                      Container(
+                        width: 8,
+                        height: 8,
+                        decoration: const BoxDecoration(
+                            color: Palette.danger, shape: BoxShape.circle),
+                      ),
+                      const SizedBox(width: 8),
+                    ],
+                    Text(
+                      !_recording
+                          ? 'Phone microphone'
+                          : 'Keeps recording with the screen off',
+                      style: const TextStyle(color: Palette.muted, fontSize: 15),
+                    ),
+                  ],
+                ),
+                const Spacer(),
+                Center(
+                  child: Text(
+                    formatDuration(_elapsed.elapsed),
+                    style: Theme.of(context).textTheme.displayLarge?.copyWith(
+                      fontWeight: FontWeight.w200,
+                      fontFeatures: const [FontFeature.tabularFigures()],
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 32),
+                SizedBox(
+                  height: 96,
+                  width: double.infinity,
+                  child: CustomPaint(
+                    painter: _WaveformPainter(
+                      levels: _levels,
+                      slots: _maxLevels,
+                      color: _paused ? Palette.faint : Palette.text,
+                    ),
+                  ),
                 ),
                 if (_error != null) ...[
                   const SizedBox(height: 16),
@@ -200,44 +233,45 @@ class _RecordScreenState extends State<RecordScreen> {
                 ],
                 const Spacer(),
                 if (!_recording)
-                  SizedBox(
-                    width: 96,
-                    height: 96,
-                    child: FilledButton(
-                      style: FilledButton.styleFrom(shape: const CircleBorder()),
+                  Center(
+                    child: _RoundButton(
+                      tooltip: 'Start recording',
+                      icon: Icons.mic,
                       onPressed: _start,
-                      child: const Icon(Icons.mic, size: 40),
                     ),
                   )
                 else
                   Row(
                     mainAxisAlignment: MainAxisAlignment.spaceEvenly,
                     children: [
-                      IconButton.outlined(
+                      IconButton(
                         tooltip: 'Discard',
-                        iconSize: 32,
+                        iconSize: 28,
+                        style: IconButton.styleFrom(
+                          backgroundColor: Palette.fill,
+                          fixedSize: const Size(60, 60),
+                        ),
                         onPressed: _confirmDiscard,
                         icon: const Icon(Icons.delete_outline),
                       ),
-                      SizedBox(
-                        width: 96,
-                        height: 96,
-                        child: FilledButton(
-                          style:
-                              FilledButton.styleFrom(shape: const CircleBorder()),
-                          onPressed: _stop,
-                          child: const Icon(Icons.stop, size: 40),
-                        ),
+                      _RoundButton(
+                        tooltip: 'Stop and save',
+                        icon: Icons.stop_rounded,
+                        onPressed: _stop,
                       ),
-                      IconButton.outlined(
+                      IconButton(
                         tooltip: _paused ? 'Resume' : 'Pause',
-                        iconSize: 32,
+                        iconSize: 28,
+                        style: IconButton.styleFrom(
+                          backgroundColor: Palette.fill,
+                          fixedSize: const Size(60, 60),
+                        ),
                         onPressed: _togglePause,
                         icon: Icon(_paused ? Icons.play_arrow : Icons.pause),
                       ),
                     ],
                   ),
-                const SizedBox(height: 32),
+                const SizedBox(height: 24),
               ],
             ),
           ),
@@ -263,5 +297,73 @@ class _RecordScreenState extends State<RecordScreen> {
       ),
     );
     if (ok == true) await _discard();
+  }
+}
+
+class _RoundButton extends StatelessWidget {
+  final String tooltip;
+  final IconData icon;
+  final VoidCallback onPressed;
+  const _RoundButton(
+      {required this.tooltip, required this.icon, required this.onPressed});
+
+  @override
+  Widget build(BuildContext context) {
+    return Tooltip(
+      message: tooltip,
+      child: Material(
+        color: Palette.text,
+        shape: const CircleBorder(),
+        clipBehavior: Clip.antiAlias,
+        child: InkWell(
+          onTap: onPressed,
+          child: SizedBox(
+            width: 88,
+            height: 88,
+            child: Icon(icon, color: Colors.white, size: 40),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// Vertical bars for recent input levels, newest on the right.
+class _WaveformPainter extends CustomPainter {
+  final List<double> levels;
+  final int slots;
+  final Color color;
+  _WaveformPainter(
+      {required List<double> levels, required this.slots, required this.color})
+      : levels = List.of(levels);
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final step = size.width / slots;
+    final barWidth = step * 0.5;
+    final paint = Paint()
+      ..color = color
+      ..strokeWidth = barWidth
+      ..strokeCap = StrokeCap.round;
+    final mid = size.height / 2;
+    final offset = slots - levels.length;
+    for (var i = 0; i < slots; i++) {
+      final level = i < offset ? 0.0 : levels[i - offset];
+      final h = (size.height - barWidth) * level / 2;
+      final x = step * i + step / 2;
+      canvas.drawLine(Offset(x, mid - h), Offset(x, mid + h), paint);
+    }
+  }
+
+  @override
+  bool shouldRepaint(_WaveformPainter old) =>
+      old.color != color || old.levels.length != levels.length ||
+      !_sameLevels(old.levels);
+
+  bool _sameLevels(List<double> other) {
+    for (var i = 0; i < levels.length; i++) {
+      if (levels[i] != other[i]) return false;
+    }
+    return true;
   }
 }

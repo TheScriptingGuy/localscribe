@@ -8,6 +8,8 @@ import '../services/notes/note_generator.dart';
 import '../services/templates/prompt_builder.dart';
 import '../services/templates/template_repository.dart';
 import '../settings/settings.dart';
+import 'recordings_screen.dart';
+import 'theme.dart';
 
 /// Templates tab: browse the bundled/custom templates, and a paste-a-transcript
 /// test that runs transcript -> note against the configured note AI.
@@ -18,10 +20,13 @@ class TemplatesScreen extends StatelessWidget {
   Widget build(BuildContext context) {
     final templates = context.read<TemplateRepository>();
     return Scaffold(
-      appBar: AppBar(title: const Text('Templates')),
+      appBar: AppBar(actions: const [OptionsButton()]),
       body: ListView(
-        padding: const EdgeInsets.all(16),
+        padding: const EdgeInsets.fromLTRB(24, 0, 24, 120),
         children: [
+          const PageHeader('Templates',
+              subtitle: 'How notes are structured',
+              padding: EdgeInsets.fromLTRB(0, 16, 0, 24)),
           Card(
             child: ListTile(
               leading: const Icon(Icons.science_outlined),
@@ -34,8 +39,9 @@ class TemplatesScreen extends StatelessWidget {
             ),
           ),
           const SizedBox(height: 16),
-          Text('Templates', style: Theme.of(context).textTheme.titleLarge),
-          const SizedBox(height: 8),
+          const SizedBox(height: 12),
+          Text('All templates', style: Theme.of(context).textTheme.titleLarge),
+          const SizedBox(height: 12),
           ...templates.all.map((t) => _TemplateTile(template: t)),
         ],
       ),

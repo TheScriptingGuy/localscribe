@@ -14,6 +14,8 @@ import '../services/templates/template_repository.dart';
 import '../services/transcription/transcription_jobs.dart';
 import '../settings/settings.dart';
 import 'format.dart';
+import 'markdown_view.dart';
+import 'theme.dart';
 
 const _autoChoice = '__auto__';
 
@@ -30,6 +32,9 @@ class _RecordingDetailScreenState extends State<RecordingDetailScreen> {
   final _player = AudioPlayer();
   bool _generating = false;
   String? _error;
+
+  /// Which generated note the Notes tab shows (index into rec.notes).
+  int _noteIndex = 0;
 
   @override
   void initState() {
@@ -100,6 +105,7 @@ class _RecordingDetailScreenState extends State<RecordingDetailScreen> {
             ?.trim();
         if (heading != null && heading.isNotEmpty) rec.title = heading;
       }
+      _noteIndex = 0;
       await store.save(rec);
     } on AiException catch (e) {
       _error = e.message;
@@ -109,6 +115,24 @@ class _RecordingDetailScreenState extends State<RecordingDetailScreen> {
       if (mounted) setState(() => _generating = false);
     }
   }
+
+  void _copy(String text, String what) {
+    Clipboard.setData(ClipboardData(text: text));
+    ScaffoldMessenger.of(context)
+        .showSnackBar(SnackBar(content: Text('$what copied')));
+  }
+
+  Future<void> _deleteNote(Recording rec, GeneratedNote note) async {
+    final store = context.read<RecordingStore>();
+    setState(() {
+      rec.notes.removeWhere((e) => e.id == note.id);
+      _noteIndex = 0;
+    });
+    await store.save(rec);
+  }
+
+  void _openChat(Recording rec) => Navigator.of(context).push(
+      MaterialPageRoute(builder: (_) => _ChatScreen(recordingId: rec.id)));
 
   Future<void> _rename(Recording rec) async {
     final store = context.read<RecordingStore>();
@@ -199,38 +223,48 @@ class _RecordingDetailScreenState extends State<RecordingDetailScreen> {
       return const Scaffold(body: Center(child: Text('Recording not found')));
     }
     final error = _error ?? jobs.errorOf(rec.id);
+    final transcript = rec.transcript;
 
     return DefaultTabController(
-      length: 3,
+      length: 2,
       child: Scaffold(
         appBar: AppBar(
-          title: Text(rec.title, maxLines: 1, overflow: TextOverflow.ellipsis),
+          title: const TabBar(
+            isScrollable: true,
+            labelPadding: EdgeInsets.symmetric(horizontal: 12),
+            tabs: [Tab(text: 'Transcript'), Tab(text: 'Notes')],
+          ),
           actions: [
             PopupMenuButton<String>(
-              onSelected: (v) => switch (v) {
-                'rename' => _rename(rec),
-                'retranscribe' => _transcribe(rec),
-                'delete' => _delete(rec),
-                _ => null,
+              icon: const Icon(Icons.more_horiz),
+              onSelected: (v) {
+                switch (v) {
+                  case 'rename':
+                    _rename(rec);
+                  case 'copy':
+                    _copy(transcript?.text ?? '', 'Transcript');
+                  case 'retranscribe':
+                    _transcribe(rec);
+                  case 'delete':
+                    _delete(rec);
+                }
               },
               itemBuilder: (_) => [
                 const PopupMenuItem(value: 'rename', child: Text('Rename')),
-                if (rec.transcript != null && !jobs.isRunning(rec.id))
+                if (transcript != null)
+                  const PopupMenuItem(
+                      value: 'copy', child: Text('Copy transcript')),
+                if (transcript != null && !jobs.isRunning(rec.id))
                   const PopupMenuItem(
                       value: 'retranscribe', child: Text('Transcribe again')),
                 const PopupMenuItem(value: 'delete', child: Text('Delete')),
               ],
             ),
+            const SizedBox(width: 8),
           ],
-          bottom: const TabBar(tabs: [
-            Tab(text: 'Transcript'),
-            Tab(text: 'Notes'),
-            Tab(text: 'Ask AI'),
-          ]),
         ),
         body: Column(
           children: [
-            _PlayerBar(player: _player),
             if (error != null)
               MaterialBanner(
                 content: Text(error),
@@ -248,9 +282,9 @@ class _RecordingDetailScreenState extends State<RecordingDetailScreen> {
               child: TabBarView(children: [
                 _transcriptTab(rec, jobs),
                 _notesTab(rec),
-                _ChatTab(recording: rec),
               ]),
             ),
+            if (transcript != null) _AskBar(onTap: () => _openChat(rec)),
           ],
         ),
       ),
@@ -259,82 +293,291 @@ class _RecordingDetailScreenState extends State<RecordingDetailScreen> {
 
   Widget _transcriptTab(Recording rec, TranscriptionJobs jobs) {
     final t = rec.transcript;
+    final Widget content;
     if (jobs.isRunning(rec.id)) {
-      return _TranscribeProgress(
+      content = _TranscribeProgress(
         progress: jobs.progressOf(rec.id),
         onCancel: () => jobs.cancel(rec.id),
       );
-    }
-    if (t == null) {
+    } else if (t == null) {
       final settings = context.read<Settings>();
-      return _CallToAction(
-        icon: Icons.subtitles_outlined,
+      content = _CallToAction(
+        padding: const EdgeInsets.symmetric(vertical: 12),
         text: settings.transcription.onDevice
             ? 'Transcribe on this phone with whisper.cpp. The audio never '
                 'leaves the device.'
             : 'Send the audio to your configured Whisper endpoint.',
-        button: FilledButton.icon(
+        button: FilledButton(
           onPressed: () => _transcribe(rec),
-          icon: const Icon(Icons.subtitles),
-          label: const Text('Transcribe'),
+          child: const Text('Transcribe'),
         ),
       );
-    }
-    if (t.segments.isEmpty) {
-      return SingleChildScrollView(
-        padding: const EdgeInsets.all(16),
-        child: SelectableText(t.text),
+    } else if (t.segments.isEmpty) {
+      content = SelectableText(t.text,
+          style: Theme.of(context).textTheme.bodyLarge);
+    } else {
+      content = Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          for (final para in _paragraphs(t.segments))
+            _TranscriptParagraph(
+              start: para.first.start,
+              text: para.map((s) => s.text.trim()).join(' '),
+              onTap: () {
+                _player.seek(
+                    Duration(milliseconds: (para.first.start * 1000).round()));
+                _player.play();
+              },
+            ),
+        ],
       );
     }
-    return ListView.builder(
-      padding: const EdgeInsets.symmetric(vertical: 8),
-      itemCount: t.segments.length,
-      itemBuilder: (_, i) {
-        final s = t.segments[i];
-        return ListTile(
-          dense: true,
-          leading: Text(formatSeconds(s.start),
-              style: TextStyle(color: Theme.of(context).colorScheme.primary)),
-          title: Text(s.text),
-          onTap: () {
-            _player.seek(Duration(milliseconds: (s.start * 1000).round()));
-            _player.play();
-          },
-        );
-      },
+
+    final language = t?.language;
+    return ListView(
+      padding: const EdgeInsets.fromLTRB(24, 16, 24, 32),
+      children: [
+        Text(rec.title, style: Theme.of(context).textTheme.headlineMedium),
+        const SizedBox(height: 8),
+        Text(
+          [
+            formatRelativeDate(rec.createdAt),
+            if (rec.durationMs > 0) formatShortDuration(rec.duration),
+            if (language != null && language.isNotEmpty)
+              language.toUpperCase(),
+          ].join('  |  '),
+          style: const TextStyle(color: Palette.muted, fontSize: 15),
+        ),
+        const SizedBox(height: 20),
+        const Divider(height: 1),
+        _PlayerBar(player: _player),
+        const Divider(height: 1),
+        const SizedBox(height: 12),
+        content,
+      ],
     );
+  }
+
+  /// Groups whisper segments into readable paragraphs: break on a pause of
+  /// 2 s+, or once a paragraph is long and the last segment ends a sentence.
+  static List<List<TranscriptSegment>> _paragraphs(
+      List<TranscriptSegment> segments) {
+    final out = <List<TranscriptSegment>>[];
+    var current = <TranscriptSegment>[];
+    var chars = 0;
+    for (final s in segments) {
+      if (current.isNotEmpty) {
+        final gap = s.start - current.last.end;
+        final endsSentence =
+            RegExp(r'[.!?…]["”’)]?$').hasMatch(current.last.text.trim());
+        if (gap >= 2 || (chars > 280 && endsSentence)) {
+          out.add(current);
+          current = [];
+          chars = 0;
+        }
+      }
+      current.add(s);
+      chars += s.text.length;
+    }
+    if (current.isNotEmpty) out.add(current);
+    return out;
   }
 
   Widget _notesTab(Recording rec) {
     if (rec.transcript == null) {
       return const _CallToAction(
-        icon: Icons.description_outlined,
         text: 'Transcribe the recording first, then generate notes from any '
             'template.',
       );
     }
-    return ListView(
-      padding: const EdgeInsets.all(16),
-      children: [
-        FilledButton.icon(
+    if (rec.notes.isEmpty) {
+      return _CallToAction(
+        text: 'Turn the transcript into a summary, meeting minutes or any '
+            'other template.',
+        button: FilledButton.icon(
           onPressed: _generating ? null : () => _pickTemplate(rec),
           icon: _generating
               ? const SizedBox(
                   width: 16,
                   height: 16,
-                  child: CircularProgressIndicator(strokeWidth: 2))
-              : const Icon(Icons.auto_awesome),
+                  child: CircularProgressIndicator(
+                      strokeWidth: 2, color: Colors.white))
+              : const Icon(Icons.auto_awesome, size: 20),
           label: Text(_generating ? 'Generating…' : 'Generate note'),
         ),
-        const SizedBox(height: 16),
-        ...rec.notes.map((n) => _NoteCard(
-              note: n,
-              onDelete: () async {
-                rec.notes.removeWhere((e) => e.id == n.id);
-                await context.read<RecordingStore>().save(rec);
-              },
-            )),
+      );
+    }
+
+    final index = _noteIndex < rec.notes.length ? _noteIndex : 0;
+    final note = rec.notes[index];
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        SizedBox(
+          height: 56,
+          child: ListView(
+            scrollDirection: Axis.horizontal,
+            padding: const EdgeInsets.symmetric(horizontal: 14),
+            children: [
+              for (var i = 0; i < rec.notes.length; i++)
+                _NoteTab(
+                  label: rec.notes[i].templateName,
+                  selected: i == index,
+                  onTap: () => setState(() => _noteIndex = i),
+                ),
+              Center(
+                child: Material(
+                  color: Palette.fill,
+                  borderRadius: BorderRadius.circular(8),
+                  child: InkWell(
+                    borderRadius: BorderRadius.circular(8),
+                    onTap: _generating ? null : () => _pickTemplate(rec),
+                    child: SizedBox(
+                      width: 48,
+                      height: 32,
+                      child: _generating
+                          ? const Center(
+                              child: SizedBox(
+                                  width: 16,
+                                  height: 16,
+                                  child: CircularProgressIndicator(
+                                      strokeWidth: 2)))
+                          : const Icon(Icons.add, size: 22),
+                    ),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+        Expanded(
+          child: ListView(
+            padding: const EdgeInsets.fromLTRB(24, 16, 24, 32),
+            children: [
+              MarkdownView(note.content),
+              const SizedBox(height: 16),
+              const Divider(height: 1),
+              Row(
+                children: [
+                  Expanded(
+                    child: Text(
+                      (note.auto ? 'Auto · ' : '') +
+                          formatRelativeDate(note.createdAt),
+                      style: const TextStyle(color: Palette.muted),
+                    ),
+                  ),
+                  IconButton(
+                    tooltip: 'Copy',
+                    icon: const Icon(Icons.copy_outlined, size: 20),
+                    onPressed: () => _copy(note.content, 'Note'),
+                  ),
+                  IconButton(
+                    tooltip: 'Delete',
+                    icon: const Icon(Icons.delete_outline, size: 20),
+                    onPressed: () => _deleteNote(rec, note),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ),
       ],
+    );
+  }
+}
+
+class _NoteTab extends StatelessWidget {
+  final String label;
+  final bool selected;
+  final VoidCallback onTap;
+  const _NoteTab(
+      {required this.label, required this.selected, required this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(8),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 10),
+        child: Center(
+          child: Text(
+            label,
+            style: TextStyle(
+              fontSize: 17,
+              color: selected ? Palette.text : Palette.muted,
+              fontWeight: selected ? FontWeight.w700 : FontWeight.w400,
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _TranscriptParagraph extends StatelessWidget {
+  final double start;
+  final String text;
+  final VoidCallback onTap;
+  const _TranscriptParagraph(
+      {required this.start, required this.text, required this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(8),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(vertical: 10),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              formatSeconds(start),
+              style: const TextStyle(
+                color: Palette.muted,
+                fontSize: 14,
+                fontFeatures: [FontFeature.tabularFigures()],
+              ),
+            ),
+            const SizedBox(height: 4),
+            Text(text, style: Theme.of(context).textTheme.bodyLarge),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// Bottom entry point to the Ask-AI chat, outlined with the AI gradient.
+class _AskBar extends StatelessWidget {
+  final VoidCallback onTap;
+  const _AskBar({required this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    return SafeArea(
+      top: false,
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(24, 8, 24, 12),
+        child: GradientBorder(
+          child: InkWell(
+            onTap: onTap,
+            borderRadius: BorderRadius.circular(12),
+            child: const Padding(
+              padding: EdgeInsets.symmetric(horizontal: 18, vertical: 16),
+              child: Row(
+                children: [
+                  Icon(Icons.auto_awesome, size: 20, color: Palette.muted),
+                  SizedBox(width: 12),
+                  Text('Ask AI about this recording',
+                      style: TextStyle(color: Palette.muted, fontSize: 16)),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ),
     );
   }
 }
@@ -346,119 +589,74 @@ class _PlayerBar extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Padding(
-      padding: const EdgeInsets.fromLTRB(8, 4, 16, 4),
-      child: Row(
-        children: [
-          StreamBuilder<PlayerState>(
-            stream: player.playerStateStream,
-            builder: (_, snap) {
-              final playing = snap.data?.playing ?? false;
-              final done =
-                  snap.data?.processingState == ProcessingState.completed;
-              return IconButton(
-                icon: Icon(playing && !done ? Icons.pause : Icons.play_arrow),
-                onPressed: () async {
-                  if (done) await player.seek(Duration.zero);
-                  playing && !done ? player.pause() : player.play();
-                },
-              );
-            },
-          ),
-          Expanded(
-            child: StreamBuilder<Duration>(
-              stream: player.positionStream,
-              builder: (_, snap) {
-                final pos = snap.data ?? Duration.zero;
-                final total = player.duration ?? Duration.zero;
-                final max = total.inMilliseconds.toDouble();
-                return Row(
-                  children: [
-                    Expanded(
-                      child: Slider(
-                        value: max <= 0
-                            ? 0
-                            : pos.inMilliseconds.toDouble().clamp(0, max),
-                        max: max <= 0 ? 1 : max,
-                        onChanged: max <= 0
-                            ? null
-                            : (v) => player
-                                .seek(Duration(milliseconds: v.round())),
-                      ),
+      padding: const EdgeInsets.symmetric(vertical: 16),
+      child: StreamBuilder<Duration>(
+        stream: player.positionStream,
+        builder: (_, snap) {
+          final pos = snap.data ?? Duration.zero;
+          final total = player.duration ?? Duration.zero;
+          final max = total.inMilliseconds.toDouble();
+          return Row(
+            children: [
+              StreamBuilder<PlayerState>(
+                stream: player.playerStateStream,
+                builder: (_, snap) {
+                  final playing = snap.data?.playing ?? false;
+                  final done =
+                      snap.data?.processingState == ProcessingState.completed;
+                  return IconButton(
+                    style: IconButton.styleFrom(
+                      backgroundColor: Palette.fill,
+                      fixedSize: const Size(56, 56),
                     ),
-                    Text('${formatDuration(pos)} / ${formatDuration(total)}',
-                        style: Theme.of(context).textTheme.bodySmall),
-                  ],
-                );
-              },
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _NoteCard extends StatelessWidget {
-  final GeneratedNote note;
-  final VoidCallback onDelete;
-  const _NoteCard({required this.note, required this.onDelete});
-
-  @override
-  Widget build(BuildContext context) {
-    return Card(
-      margin: const EdgeInsets.only(bottom: 12),
-      child: Padding(
-        padding: const EdgeInsets.fromLTRB(16, 8, 8, 16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              children: [
-                Expanded(
-                  child: Text(
-                    note.auto
-                        ? '${note.templateName} · Auto'
-                        : note.templateName,
-                    style: Theme.of(context).textTheme.labelLarge,
-                  ),
+                    iconSize: 30,
+                    icon: Icon(playing && !done
+                        ? Icons.pause_rounded
+                        : Icons.play_arrow_rounded),
+                    onPressed: () async {
+                      if (done) await player.seek(Duration.zero);
+                      playing && !done ? player.pause() : player.play();
+                    },
+                  );
+                },
+              ),
+              const SizedBox(width: 4),
+              Expanded(
+                child: Slider(
+                  value: max <= 0
+                      ? 0
+                      : pos.inMilliseconds.toDouble().clamp(0, max),
+                  max: max <= 0 ? 1 : max,
+                  onChanged: max <= 0
+                      ? null
+                      : (v) => player.seek(Duration(milliseconds: v.round())),
                 ),
-                IconButton(
-                  tooltip: 'Copy',
-                  icon: const Icon(Icons.copy, size: 20),
-                  onPressed: () {
-                    Clipboard.setData(ClipboardData(text: note.content));
-                    ScaffoldMessenger.of(context).showSnackBar(
-                        const SnackBar(content: Text('Note copied')));
-                  },
+              ),
+              Text(
+                '${formatDuration(pos)} / ${formatDuration(total)}',
+                style: const TextStyle(
+                  fontSize: 15,
+                  fontFeatures: [FontFeature.tabularFigures()],
                 ),
-                IconButton(
-                  tooltip: 'Delete',
-                  icon: const Icon(Icons.delete_outline, size: 20),
-                  onPressed: onDelete,
-                ),
-              ],
-            ),
-            Text(formatDate(note.createdAt),
-                style: Theme.of(context).textTheme.bodySmall),
-            const SizedBox(height: 8),
-            SelectableText(note.content),
-          ],
-        ),
+              ),
+            ],
+          );
+        },
       ),
     );
   }
 }
 
 /// Ask-AI: questions answered strictly from this recording's transcript.
-class _ChatTab extends StatefulWidget {
-  final Recording recording;
-  const _ChatTab({required this.recording});
+class _ChatScreen extends StatefulWidget {
+  final String recordingId;
+  const _ChatScreen({required this.recordingId});
 
   @override
-  State<_ChatTab> createState() => _ChatTabState();
+  State<_ChatScreen> createState() => _ChatScreenState();
 }
 
-class _ChatTabState extends State<_ChatTab> {
+class _ChatScreenState extends State<_ChatScreen> {
   /// Turns of history sent with each question, to bound prompt size.
   static const _historyTurns = 20;
 
@@ -472,8 +670,7 @@ class _ChatTabState extends State<_ChatTab> {
     super.dispose();
   }
 
-  Future<void> _send() async {
-    final rec = widget.recording;
+  Future<void> _send(Recording rec) async {
     final question = _input.text.trim();
     if (question.isEmpty || _pending != null) return;
     final settings = context.read<Settings>();
@@ -514,69 +711,81 @@ class _ChatTabState extends State<_ChatTab> {
 
   @override
   Widget build(BuildContext context) {
-    final rec = widget.recording;
-    if (rec.transcript == null) {
-      return const _CallToAction(
-        icon: Icons.forum_outlined,
-        text: 'Transcribe the recording first, then ask questions about it.',
-      );
+    final rec = context.watch<RecordingStore>().byId(widget.recordingId);
+    if (rec == null || rec.transcript == null) {
+      return const Scaffold(body: Center(child: Text('Recording not found')));
     }
     final bubbles = [
-      ...rec.chat.map((m) => _Bubble(
-          text: m.content, mine: m.role == ChatRole.user)),
+      ...rec.chat.map(
+          (m) => _Bubble(text: m.content, mine: m.role == ChatRole.user)),
       if (_pending != null)
         _Bubble(text: _pending!.isEmpty ? '…' : _pending!, mine: false),
     ];
-    return Column(
-      children: [
-        Expanded(
-          child: bubbles.isEmpty
-              ? const _CallToAction(
-                  icon: Icons.forum_outlined,
-                  text: 'Ask anything about this recording — e.g. "What did '
-                      'we decide?" or "List the action items."',
-                )
-              : ListView(
-                  reverse: true,
-                  padding: const EdgeInsets.all(12),
-                  children: bubbles.reversed.toList(),
-                ),
-        ),
-        if (_error != null)
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 16),
-            child: Text(_error!,
-                style: TextStyle(color: Theme.of(context).colorScheme.error)),
-          ),
-        SafeArea(
-          top: false,
-          child: Padding(
-            padding: const EdgeInsets.fromLTRB(12, 4, 4, 8),
-            child: Row(
-              children: [
-                Expanded(
-                  child: TextField(
-                    controller: _input,
-                    minLines: 1,
-                    maxLines: 4,
-                    textInputAction: TextInputAction.send,
-                    onSubmitted: (_) => _send(),
-                    decoration: const InputDecoration(
-                      hintText: 'Ask about this recording…',
-                      border: OutlineInputBorder(),
-                      isDense: true,
-                    ),
+    return Scaffold(
+      appBar: AppBar(title: const Text('Ask AI')),
+      body: Column(
+        children: [
+          Expanded(
+            child: bubbles.isEmpty
+                ? _CallToAction(
+                    text: 'Ask anything about "${rec.title}", e.g. "What did '
+                        'we decide?" or "List the action items."',
+                  )
+                : ListView(
+                    reverse: true,
+                    padding: const EdgeInsets.fromLTRB(24, 12, 24, 12),
+                    children: bubbles.reversed.toList(),
                   ),
+          ),
+          if (_error != null)
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 24),
+              child: Text(_error!,
+                  style: TextStyle(color: Theme.of(context).colorScheme.error)),
+            ),
+          SafeArea(
+            top: false,
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(24, 8, 24, 12),
+              child: GradientBorder(
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: TextField(
+                        controller: _input,
+                        minLines: 1,
+                        maxLines: 4,
+                        textInputAction: TextInputAction.send,
+                        onSubmitted: (_) => _send(rec),
+                        decoration: const InputDecoration(
+                          hintText: 'Ask about this recording',
+                          filled: false,
+                          border: InputBorder.none,
+                          enabledBorder: InputBorder.none,
+                          focusedBorder: InputBorder.none,
+                          contentPadding: EdgeInsets.symmetric(
+                              horizontal: 18, vertical: 16),
+                        ),
+                      ),
+                    ),
+                    Padding(
+                      padding: const EdgeInsets.only(right: 6),
+                      child: IconButton.filled(
+                        style: IconButton.styleFrom(
+                          backgroundColor: Palette.text,
+                          foregroundColor: Colors.white,
+                        ),
+                        icon: const Icon(Icons.arrow_upward, size: 20),
+                        onPressed: _pending == null ? () => _send(rec) : null,
+                      ),
+                    ),
+                  ],
                 ),
-                IconButton(
-                  icon: const Icon(Icons.send),
-                  onPressed: _pending == null ? _send : null,
-                ),
-              ],
+              ),
             ),
           ),
-        ),
-      ],
+        ],
+      ),
     );
   }
 }
@@ -588,19 +797,25 @@ class _Bubble extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
+    if (!mine) {
+      // Answers read like a note, not a chat bubble.
+      return Padding(
+        padding: const EdgeInsets.symmetric(vertical: 8),
+        child: MarkdownView(text, compact: true),
+      );
+    }
     return Align(
-      alignment: mine ? Alignment.centerRight : Alignment.centerLeft,
+      alignment: Alignment.centerRight,
       child: Container(
-        margin: const EdgeInsets.symmetric(vertical: 4),
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+        margin: const EdgeInsets.symmetric(vertical: 8),
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
         constraints:
-            BoxConstraints(maxWidth: MediaQuery.sizeOf(context).width * 0.8),
+            BoxConstraints(maxWidth: MediaQuery.sizeOf(context).width * 0.75),
         decoration: BoxDecoration(
-          color: mine ? scheme.primaryContainer : scheme.surfaceContainerHighest,
-          borderRadius: BorderRadius.circular(12),
+          color: Palette.fill,
+          borderRadius: BorderRadius.circular(18),
         ),
-        child: SelectableText(text),
+        child: SelectableText(text, style: const TextStyle(fontSize: 16)),
       ),
     );
   }
@@ -614,50 +829,51 @@ class _TranscribeProgress extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final p = progress;
-    return Center(
-      child: Padding(
-        padding: const EdgeInsets.all(32),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            LinearProgressIndicator(value: p),
-            const SizedBox(height: 16),
-            Text(p == null
-                ? 'Transcribing…'
-                : 'Transcribing… ${(p * 100).floor()}%'),
-            const SizedBox(height: 4),
-            Text('You can leave this screen; it keeps going.',
-                style: Theme.of(context).textTheme.bodySmall),
-            const SizedBox(height: 16),
-            OutlinedButton(onPressed: onCancel, child: const Text('Cancel')),
-          ],
-        ),
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 24),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            p == null ? 'Transcribing…' : 'Transcribing… ${(p * 100).floor()}%',
+            style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w600),
+          ),
+          const SizedBox(height: 16),
+          ClipRRect(
+            borderRadius: BorderRadius.circular(4),
+            child: LinearProgressIndicator(value: p, minHeight: 4),
+          ),
+          const SizedBox(height: 12),
+          const Text('You can leave this screen; it keeps going.',
+              style: TextStyle(color: Palette.muted)),
+          const SizedBox(height: 20),
+          OutlinedButton(onPressed: onCancel, child: const Text('Cancel')),
+        ],
       ),
     );
   }
 }
 
 class _CallToAction extends StatelessWidget {
-  final IconData icon;
   final String text;
   final Widget? button;
-  const _CallToAction({required this.icon, required this.text, this.button});
+  final EdgeInsets padding;
+  const _CallToAction(
+      {required this.text, this.button, this.padding = const EdgeInsets.all(24)});
 
   @override
   Widget build(BuildContext context) {
-    final muted = Theme.of(context).colorScheme.outline;
-    return Center(
-      child: Padding(
-        padding: const EdgeInsets.all(32),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(icon, size: 48, color: muted),
-            const SizedBox(height: 12),
-            Text(text, textAlign: TextAlign.center, style: TextStyle(color: muted)),
-            if (button != null) ...[const SizedBox(height: 16), button!],
-          ],
-        ),
+    return Padding(
+      padding: padding,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Text(text,
+              style: const TextStyle(
+                  color: Palette.muted, fontSize: 16, height: 1.5)),
+          if (button != null) ...[const SizedBox(height: 20), button!],
+        ],
       ),
     );
   }

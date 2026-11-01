@@ -5,6 +5,7 @@ import '../models/ai_config.dart';
 import '../services/models/whisper_models.dart';
 import '../settings/settings.dart';
 import 'models_screen.dart';
+import 'theme.dart';
 
 /// Spoken-language choices for transcription ('auto' = detect).
 const _languages = {
@@ -47,10 +48,13 @@ class _OptionsScreenState extends State<OptionsScreen> {
     final n = settings.noteAi;
 
     return Scaffold(
-      appBar: AppBar(title: const Text('Options')),
+      appBar: AppBar(),
       body: ListView(
-        padding: const EdgeInsets.all(16),
+        padding: const EdgeInsets.fromLTRB(24, 0, 24, 32),
         children: [
+          const PageHeader('Options',
+              subtitle: 'Where transcription and notes run',
+              padding: EdgeInsets.fromLTRB(0, 8, 0, 24)),
           _sectionTitle(context, 'Transcription AI'),
           _modeToggle(
             onDevice: t.onDevice,
@@ -60,6 +64,7 @@ class _OptionsScreenState extends State<OptionsScreen> {
             },
             onDeviceLabel: 'On-device (whisper.cpp)',
           ),
+          const SizedBox(height: 8),
           DropdownButtonFormField<String>(
             initialValue:
                 _languages.containsKey(t.language) ? t.language : 'auto',
