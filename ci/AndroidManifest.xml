@@ -16,6 +16,7 @@
     <!-- Foreground recording/transcription service -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-permission android:name="android.permission.WAKE_LOCK" />
 
@@ -42,12 +43,13 @@
         <meta-data
             android:name="flutterEmbedding"
             android:value="2" />
-        <!-- Keeps mic recording alive with the screen off / app in background.
+        <!-- Keeps mic recording (microphone) and on-device transcription
+             (dataSync) alive with the screen off / app in background.
              Service name is fixed by flutter_foreground_task. stopWithTask:
-             swiping the app away ends the recording service too. -->
+             swiping the app away ends the service too. -->
         <service
             android:name="com.pravera.flutter_foreground_task.service.ForegroundService"
-            android:foregroundServiceType="microphone"
+            android:foregroundServiceType="microphone|dataSync"
             android:stopWithTask="true"
             android:exported="false" />
     </application>

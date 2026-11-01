@@ -3,7 +3,9 @@ import 'package:provider/provider.dart';
 
 import 'services/audio/recording_service.dart';
 import 'services/library/recording_store.dart';
+import 'services/models/whisper_models.dart';
 import 'services/templates/template_repository.dart';
+import 'services/transcription/transcription_jobs.dart';
 import 'settings/settings.dart';
 import 'ui/options_screen.dart';
 import 'ui/recordings_screen.dart';
@@ -22,10 +24,16 @@ Future<void> main() async {
   final recordings = RecordingStore();
   await recordings.load();
 
+  final models = WhisperModelManager();
+  await models.load();
+
   runApp(LocalScribeApp(
     settings: settings,
     templates: templates,
     recordings: recordings,
+    models: models,
+    jobs: TranscriptionJobs(
+        store: recordings, settings: settings, models: models),
   ));
 }
 
@@ -33,12 +41,16 @@ class LocalScribeApp extends StatelessWidget {
   final Settings settings;
   final TemplateRepository templates;
   final RecordingStore recordings;
+  final WhisperModelManager models;
+  final TranscriptionJobs jobs;
 
   const LocalScribeApp({
     super.key,
     required this.settings,
     required this.templates,
     required this.recordings,
+    required this.models,
+    required this.jobs,
   });
 
   @override
@@ -48,6 +60,8 @@ class LocalScribeApp extends StatelessWidget {
         ChangeNotifierProvider.value(value: settings),
         Provider.value(value: templates),
         ChangeNotifierProvider.value(value: recordings),
+        ChangeNotifierProvider.value(value: models),
+        ChangeNotifierProvider.value(value: jobs),
       ],
       child: MaterialApp(
         title: 'LocalScribe',

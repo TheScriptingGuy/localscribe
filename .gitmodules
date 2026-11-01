@@ -1,0 +1,3 @@
+[submodule "packages/localscribe_native/third_party/whisper.cpp"]
+	path = packages/localscribe_native/third_party/whisper.cpp
+	url = https://github.com/ggml-org/whisper.cpp.git

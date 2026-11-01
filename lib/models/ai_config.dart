@@ -86,25 +86,29 @@ class RemoteWhisperConfig {
 /// Transcription pipeline config: on-device whisper.cpp OR a remote URL.
 class TranscriptionConfig {
   bool onDevice;
-  String localModel; // whisper.cpp GGML model id/path (Phase 3)
+  String localModel; // whisper.cpp GGML model file, see whisper_models.dart
+  String language; // ISO 639-1 code, or 'auto' to detect
   RemoteWhisperConfig remote;
 
   TranscriptionConfig({
     this.onDevice = false,
-    this.localModel = 'ggml-base.bin',
+    this.localModel = 'ggml-base-q5_1.bin',
+    this.language = 'auto',
     RemoteWhisperConfig? remote,
   }) : remote = remote ?? RemoteWhisperConfig();
 
   Map<String, dynamic> toJson() => {
         'onDevice': onDevice,
         'localModel': localModel,
+        'language': language,
         'remote': remote.toJson(),
       };
 
   factory TranscriptionConfig.fromJson(Map<String, dynamic> j) =>
       TranscriptionConfig(
         onDevice: j['onDevice'] ?? false,
-        localModel: j['localModel'] ?? 'ggml-base.bin',
+        localModel: j['localModel'] ?? 'ggml-base-q5_1.bin',
+        language: j['language'] ?? 'auto',
         remote: j['remote'] != null
             ? RemoteWhisperConfig.fromJson(
                 Map<String, dynamic>.from(j['remote']))

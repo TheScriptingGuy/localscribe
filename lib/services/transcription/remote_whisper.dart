@@ -38,7 +38,12 @@ class RemoteWhisperTranscriber implements Transcriber {
   }
 
   @override
-  Future<TranscriptResult> transcribe(File audio, {String? language}) async {
+  Future<TranscriptResult> transcribe(
+    File audio, {
+    String? language,
+    void Function(double progress)? onProgress,
+    CancelSignal? cancel,
+  }) async {
     if (!await audio.exists()) {
       throw AiException('Audio file not found: ${audio.path}');
     }
@@ -53,10 +58,13 @@ class RemoteWhisperTranscriber implements Transcriber {
       ),
     });
 
+    final token = CancelToken();
+    cancel?.onCancel(token.cancel);
     try {
       final resp = await _dio.post(
         _endpoint,
         data: form,
+        cancelToken: token,
         options: Options(
           headers: {
             if (config.apiKey.isNotEmpty)
@@ -67,6 +75,9 @@ class RemoteWhisperTranscriber implements Transcriber {
       );
       return _parse(resp.data);
     } on DioException catch (e) {
+      if (CancelToken.isCancel(e)) {
+        throw AiException('Cancelled', cancelled: true);
+      }
       throw AiException(
         'Transcription request failed: ${e.message}',
         statusCode: e.response?.statusCode,

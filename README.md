@@ -54,7 +54,23 @@ lib/
     storage/                     local DB (recordings, transcripts, notes)
   ui/                            screens + widgets
 assets/templates/*.json          default note templates
+packages/localscribe_native/     FFI plugin: whisper.cpp (git submodule) +
+                                 NDK MediaCodec audio decoding, built by CMake
 ```
+
+### On-device transcription
+
+`packages/localscribe_native` compiles whisper.cpp (pinned submodule in
+`third_party/whisper.cpp`) and a small C++ bridge into `liblocalscribe_native.so`.
+The bridge decodes any audio Android can play (m4a/AAC, mp3, wav, ogg/opus,
+flac) with the NDK `AMediaCodec` API, resamples to 16 kHz mono into a scratch
+file, and transcribes in 10-minute chunks split at the quietest moment, so
+memory stays flat for long recordings. Dart calls it from a background isolate.
+
+Models (GGML, multilingual) download in-app from the whisper.cpp project's
+Hugging Face repository, resume if interrupted, and are verified by SHA-256.
+The arm64 build targets ARMv8.2-A + FP16 (most phones from 2018 on); the app
+checks `/proc/cpuinfo` and explains when a phone can't run it.
 
 ### AI backend model (the core abstraction)
 
@@ -85,18 +101,20 @@ Android platform files, builds a release APK, and uploads it as the
 **`localscribe-apk`** artifact. Download it from the workflow run's *Artifacts*
 section and install on the phone (allow "install unknown apps").
 
-To build locally instead: install Flutter (stable) + Android SDK + NDK, then
+Clone with `--recurse-submodules` (or run `git submodule update --init`) to get
+whisper.cpp. To build locally: install Flutter (stable) + Android SDK + NDK, then
 `flutter create --platforms=android --org ai.localscribe --project-name localscribe .`
 , copy `ci/AndroidManifest.xml` over `android/app/src/main/AndroidManifest.xml`,
 and run `flutter build apk --release`.
 
 ## Roadmap (phased)
 
-- **Phase 1 (this commit): foundation.** Repo + CI, settings, the AI-backend
+- **Phase 1 ✅ foundation.** Repo + CI, settings, the AI-backend
   abstraction, **working remote (URL) clients** for Whisper / OpenAI / Anthropic,
   bundled templates + local prompt synthesis, storage, and the UI shell.
-- **Phase 2:** phone-mic recording + file import wired to the transcribe→note flow.
-- **Phase 3:** on-device `whisper.cpp` (FFI + NDK build in CI) + model downloader.
+- **Phase 2 ✅** phone-mic recording (background service) + file import wired to
+  the transcribe→note flow, Ask-AI chat.
+- **Phase 3 ✅** on-device `whisper.cpp` (FFI + NDK build in CI) + model downloader.
 - **Phase 4:** on-device `llama.cpp` (GGUF) notes + Ask-AI chat.
 - **Phase 5:** Plaud BLE live capture (RSA handshake + ChaCha20-Poly1305 + Opus).
 

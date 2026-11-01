@@ -1,19 +1,25 @@
 import '../../models/ai_config.dart';
+import '../models/whisper_models.dart';
 import '../notes/anthropic_generator.dart';
 import '../notes/note_generator.dart';
 import '../notes/openai_generator.dart';
+import '../transcription/local_whisper.dart';
 import '../transcription/remote_whisper.dart';
 import '../transcription/transcriber.dart';
 import 'ai_types.dart';
 
-/// Builds live AI backends from configuration. On-device backends arrive in
-/// Phases 3-4; until then selecting "on-device" throws a clear message.
+/// Builds live AI backends from configuration. On-device notes arrive in
+/// Phase 4; until then selecting it throws a clear message.
 class AiFactory {
-  static Transcriber transcriber(TranscriptionConfig c) {
+  static Transcriber transcriber(TranscriptionConfig c,
+      {required WhisperModelManager models}) {
     if (c.onDevice) {
-      throw AiException(
-          'On-device transcription (whisper.cpp) is not available yet — '
-          'configure a Whisper API URL in Options, or wait for Phase 3.');
+      final model = whisperModelByFile(c.localModel);
+      if (model == null || !models.isInstalled(model)) {
+        throw AiException('No on-device model downloaded yet. Open Options '
+            '> Transcription AI > Models to download one.');
+      }
+      return LocalWhisperTranscriber(model, models.fileOf(model));
     }
     if (c.remote.baseUrl.trim().isEmpty) {
       throw AiException('No transcription API URL configured.');

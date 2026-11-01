@@ -71,7 +71,10 @@ class ChatMessage {
 class AiException implements Exception {
   final String message;
   final int? statusCode;
-  AiException(this.message, {this.statusCode});
+
+  /// The user stopped the job; not an error worth showing.
+  final bool cancelled;
+  AiException(this.message, {this.statusCode, this.cancelled = false});
   @override
   String toString() =>
       'AiException($message${statusCode != null ? ', HTTP $statusCode' : ''})';

@@ -11,6 +11,7 @@ import '../services/library/recording_store.dart';
 import '../services/notes/auto_template.dart';
 import '../services/templates/prompt_builder.dart';
 import '../services/templates/template_repository.dart';
+import '../services/transcription/transcription_jobs.dart';
 import '../settings/settings.dart';
 import 'format.dart';
 
@@ -27,7 +28,6 @@ class RecordingDetailScreen extends StatefulWidget {
 
 class _RecordingDetailScreenState extends State<RecordingDetailScreen> {
   final _player = AudioPlayer();
-  bool _transcribing = false;
   bool _generating = false;
   String? _error;
 
@@ -49,24 +49,9 @@ class _RecordingDetailScreenState extends State<RecordingDetailScreen> {
 
   // --- actions -------------------------------------------------------------
 
-  Future<void> _transcribe(Recording rec) async {
-    final settings = context.read<Settings>();
-    final store = context.read<RecordingStore>();
-    setState(() {
-      _transcribing = true;
-      _error = null;
-    });
-    try {
-      final transcriber = AiFactory.transcriber(settings.transcription);
-      rec.transcript = await transcriber.transcribe(store.audioOf(rec));
-      await store.save(rec);
-    } on AiException catch (e) {
-      _error = e.message;
-    } catch (e) {
-      _error = e.toString();
-    } finally {
-      if (mounted) setState(() => _transcribing = false);
-    }
+  Future<void> _transcribe(Recording rec) {
+    setState(() => _error = null);
+    return context.read<TranscriptionJobs>().start(rec);
   }
 
   Future<void> _generate(Recording rec, String choice) async {
@@ -208,10 +193,12 @@ class _RecordingDetailScreenState extends State<RecordingDetailScreen> {
   @override
   Widget build(BuildContext context) {
     final store = context.watch<RecordingStore>();
+    final jobs = context.watch<TranscriptionJobs>();
     final rec = store.byId(widget.recordingId);
     if (rec == null) {
       return const Scaffold(body: Center(child: Text('Recording not found')));
     }
+    final error = _error ?? jobs.errorOf(rec.id);
 
     return DefaultTabController(
       length: 3,
@@ -228,7 +215,7 @@ class _RecordingDetailScreenState extends State<RecordingDetailScreen> {
               },
               itemBuilder: (_) => [
                 const PopupMenuItem(value: 'rename', child: Text('Rename')),
-                if (rec.transcript != null)
+                if (rec.transcript != null && !jobs.isRunning(rec.id))
                   const PopupMenuItem(
                       value: 'retranscribe', child: Text('Transcribe again')),
                 const PopupMenuItem(value: 'delete', child: Text('Delete')),
@@ -244,19 +231,22 @@ class _RecordingDetailScreenState extends State<RecordingDetailScreen> {
         body: Column(
           children: [
             _PlayerBar(player: _player),
-            if (_error != null)
+            if (error != null)
               MaterialBanner(
-                content: Text(_error!),
+                content: Text(error),
                 backgroundColor: Theme.of(context).colorScheme.errorContainer,
                 actions: [
                   TextButton(
-                      onPressed: () => setState(() => _error = null),
+                      onPressed: () {
+                        jobs.clearError(rec.id);
+                        setState(() => _error = null);
+                      },
                       child: const Text('Dismiss')),
                 ],
               ),
             Expanded(
               child: TabBarView(children: [
-                _transcriptTab(rec),
+                _transcriptTab(rec, jobs),
                 _notesTab(rec),
                 _ChatTab(recording: rec),
               ]),
@@ -267,18 +257,21 @@ class _RecordingDetailScreenState extends State<RecordingDetailScreen> {
     );
   }
 
-  Widget _transcriptTab(Recording rec) {
+  Widget _transcriptTab(Recording rec, TranscriptionJobs jobs) {
     final t = rec.transcript;
-    if (_transcribing) {
-      return const _Busy(label: 'Transcribing…');
+    if (jobs.isRunning(rec.id)) {
+      return _TranscribeProgress(
+        progress: jobs.progressOf(rec.id),
+        onCancel: () => jobs.cancel(rec.id),
+      );
     }
     if (t == null) {
       final settings = context.read<Settings>();
       return _CallToAction(
         icon: Icons.subtitles_outlined,
         text: settings.transcription.onDevice
-            ? 'On-device transcription arrives in Phase 3. Switch Transcription '
-                'AI to a custom API URL in Options for now.'
+            ? 'Transcribe on this phone with whisper.cpp. The audio never '
+                'leaves the device.'
             : 'Send the audio to your configured Whisper endpoint.',
         button: FilledButton.icon(
           onPressed: () => _transcribe(rec),
@@ -613,21 +606,35 @@ class _Bubble extends StatelessWidget {
   }
 }
 
-class _Busy extends StatelessWidget {
-  final String label;
-  const _Busy({required this.label});
+class _TranscribeProgress extends StatelessWidget {
+  final double? progress;
+  final VoidCallback onCancel;
+  const _TranscribeProgress({required this.progress, required this.onCancel});
 
   @override
-  Widget build(BuildContext context) => Center(
+  Widget build(BuildContext context) {
+    final p = progress;
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.all(32),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            const CircularProgressIndicator(),
+            LinearProgressIndicator(value: p),
             const SizedBox(height: 16),
-            Text(label),
+            Text(p == null
+                ? 'Transcribing…'
+                : 'Transcribing… ${(p * 100).floor()}%'),
+            const SizedBox(height: 4),
+            Text('You can leave this screen; it keeps going.',
+                style: Theme.of(context).textTheme.bodySmall),
+            const SizedBox(height: 16),
+            OutlinedButton(onPressed: onCancel, child: const Text('Cancel')),
           ],
         ),
-      );
+      ),
+    );
+  }
 }
 
 class _CallToAction extends StatelessWidget {

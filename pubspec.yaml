@@ -28,6 +28,10 @@ dependencies:
   file_picker: ^13.3.1
   flutter_foreground_task: ^11.0.3 # keeps mic recording alive in background
 
+  # On-device transcription: whisper.cpp + MediaCodec decoding via FFI
+  localscribe_native:
+    path: packages/localscribe_native
+
   # BLE (Plaud device): package added in Phase 5. flutter_blue_plus 1.x
   # pins compileSdk 33 (breaks current AndroidX) and 2.x changed license.
 

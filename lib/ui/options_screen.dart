@@ -2,7 +2,34 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import '../models/ai_config.dart';
+import '../services/models/whisper_models.dart';
 import '../settings/settings.dart';
+import 'models_screen.dart';
+
+/// Spoken-language choices for transcription ('auto' = detect).
+const _languages = {
+  'auto': 'Detect automatically',
+  'en': 'English',
+  'nl': 'Dutch',
+  'de': 'German',
+  'fr': 'French',
+  'es': 'Spanish',
+  'it': 'Italian',
+  'pt': 'Portuguese',
+  'pl': 'Polish',
+  'sv': 'Swedish',
+  'da': 'Danish',
+  'no': 'Norwegian',
+  'fi': 'Finnish',
+  'tr': 'Turkish',
+  'ru': 'Russian',
+  'uk': 'Ukrainian',
+  'zh': 'Chinese',
+  'ja': 'Japanese',
+  'ko': 'Korean',
+  'ar': 'Arabic',
+  'hi': 'Hindi',
+};
 
 /// Configure both AI pipelines: on-device model OR a custom API URL.
 class OptionsScreen extends StatefulWidget {
@@ -31,7 +58,22 @@ class _OptionsScreenState extends State<OptionsScreen> {
               t.onDevice = v;
               settings.save();
             },
-            onDeviceLabel: 'On-device (whisper.cpp) — Phase 3',
+            onDeviceLabel: 'On-device (whisper.cpp)',
+          ),
+          DropdownButtonFormField<String>(
+            initialValue:
+                _languages.containsKey(t.language) ? t.language : 'auto',
+            decoration: const InputDecoration(
+                labelText: 'Spoken language', border: OutlineInputBorder()),
+            items: _languages.entries
+                .map((e) =>
+                    DropdownMenuItem(value: e.key, child: Text(e.value)))
+                .toList(),
+            onChanged: (v) {
+              if (v == null) return;
+              t.language = v;
+              settings.save();
+            },
           ),
           if (!t.onDevice) ...[
             _field('API base URL', t.remote.baseUrl,
@@ -45,7 +87,7 @@ class _OptionsScreenState extends State<OptionsScreen> {
                 'OpenAI-compatible /audio/transcriptions. Works with OpenAI, '
                 'Groq, or a self-hosted whisper.cpp HTTP server.'),
           ] else
-            const _Hint('Downloadable whisper models arrive in Phase 3.'),
+            _localModelTile(context, t),
           const Divider(height: 40),
           _sectionTitle(context, 'Note AI  &  Ask-AI chat'),
           _modeToggle(
@@ -102,6 +144,28 @@ class _OptionsScreenState extends State<OptionsScreen> {
             label: const Text('Save settings'),
           ),
         ],
+      ),
+    );
+  }
+
+  Widget _localModelTile(BuildContext context, TranscriptionConfig t) {
+    final models = context.watch<WhisperModelManager>();
+    final selected = whisperModelByFile(t.localModel);
+    final model =
+        selected != null && models.isInstalled(selected) ? selected : null;
+    return Card(
+      margin: const EdgeInsets.only(top: 12),
+      child: ListTile(
+        leading: Icon(model != null ? Icons.memory : Icons.download_outlined),
+        title: Text(model != null
+            ? 'Model: ${model.label}'
+            : 'No model selected'),
+        subtitle: Text(model != null
+            ? '${model.sizeLabel} · audio stays on this phone'
+            : 'Download a model and tap it to use it offline'),
+        trailing: const Icon(Icons.chevron_right),
+        onTap: () => Navigator.push(context,
+            MaterialPageRoute(builder: (_) => const ModelsScreen())),
       ),
     );
   }
