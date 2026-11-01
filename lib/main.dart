@@ -1,10 +1,12 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
+import 'services/library/recording_store.dart';
 import 'services/templates/template_repository.dart';
 import 'settings/settings.dart';
-import 'ui/home_screen.dart';
 import 'ui/options_screen.dart';
+import 'ui/recordings_screen.dart';
+import 'ui/templates_screen.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -15,17 +17,26 @@ Future<void> main() async {
   final templates = TemplateRepository();
   await templates.load();
 
-  runApp(LocalScribeApp(settings: settings, templates: templates));
+  final recordings = RecordingStore();
+  await recordings.load();
+
+  runApp(LocalScribeApp(
+    settings: settings,
+    templates: templates,
+    recordings: recordings,
+  ));
 }
 
 class LocalScribeApp extends StatelessWidget {
   final Settings settings;
   final TemplateRepository templates;
+  final RecordingStore recordings;
 
   const LocalScribeApp({
     super.key,
     required this.settings,
     required this.templates,
+    required this.recordings,
   });
 
   @override
@@ -34,6 +45,7 @@ class LocalScribeApp extends StatelessWidget {
       providers: [
         ChangeNotifierProvider.value(value: settings),
         Provider.value(value: templates),
+        ChangeNotifierProvider.value(value: recordings),
       ],
       child: MaterialApp(
         title: 'LocalScribe',
@@ -64,7 +76,7 @@ class RootShell extends StatefulWidget {
 class _RootShellState extends State<RootShell> {
   int _index = 0;
 
-  static const _pages = [HomeScreen(), OptionsScreen()];
+  static const _pages = [RecordingsScreen(), TemplatesScreen(), OptionsScreen()];
 
   @override
   Widget build(BuildContext context) {
@@ -75,9 +87,13 @@ class _RootShellState extends State<RootShell> {
         onDestinationSelected: (i) => setState(() => _index = i),
         destinations: const [
           NavigationDestination(
+              icon: Icon(Icons.graphic_eq_outlined),
+              selectedIcon: Icon(Icons.graphic_eq),
+              label: 'Recordings'),
+          NavigationDestination(
               icon: Icon(Icons.library_books_outlined),
               selectedIcon: Icon(Icons.library_books),
-              label: 'Notes'),
+              label: 'Templates'),
           NavigationDestination(
               icon: Icon(Icons.settings_outlined),
               selectedIcon: Icon(Icons.settings),

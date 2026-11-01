@@ -35,6 +35,20 @@ class TranscriptResult {
     this.segments = const [],
     this.language,
   });
+
+  Map<String, dynamic> toJson() => {
+        'text': text,
+        'segments': segments.map((s) => s.toJson()).toList(),
+        'language': language,
+      };
+
+  factory TranscriptResult.fromJson(Map<String, dynamic> j) => TranscriptResult(
+        text: j['text'] ?? '',
+        segments: ((j['segments'] as List?) ?? const [])
+            .map((e) => TranscriptSegment.fromJson(Map<String, dynamic>.from(e)))
+            .toList(),
+        language: j['language'],
+      );
 }
 
 enum ChatRole { system, user, assistant }
@@ -43,6 +57,14 @@ class ChatMessage {
   final ChatRole role;
   final String content;
   const ChatMessage(this.role, this.content);
+
+  Map<String, dynamic> toJson() => {'role': role.name, 'content': content};
+
+  factory ChatMessage.fromJson(Map<String, dynamic> j) => ChatMessage(
+        ChatRole.values.firstWhere((r) => r.name == j['role'],
+            orElse: () => ChatRole.user),
+        j['content'] ?? '',
+      );
 }
 
 /// Thrown by remote AI clients with a human-readable reason.

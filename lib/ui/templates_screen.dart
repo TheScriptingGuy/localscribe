@@ -9,23 +9,23 @@ import '../services/templates/prompt_builder.dart';
 import '../services/templates/template_repository.dart';
 import '../settings/settings.dart';
 
-/// Phase 1 home: browse templates and run a transcript -> note test end-to-end
-/// against the configured note-AI URL. (Recording/BLE wiring lands in Phase 2+.)
-class HomeScreen extends StatelessWidget {
-  const HomeScreen({super.key});
+/// Templates tab: browse the bundled/custom templates, and a paste-a-transcript
+/// test that runs transcript -> note against the configured note AI.
+class TemplatesScreen extends StatelessWidget {
+  const TemplatesScreen({super.key});
 
   @override
   Widget build(BuildContext context) {
     final templates = context.read<TemplateRepository>();
     return Scaffold(
-      appBar: AppBar(title: const Text('LocalScribe')),
+      appBar: AppBar(title: const Text('Templates')),
       body: ListView(
         padding: const EdgeInsets.all(16),
         children: [
           Card(
             child: ListTile(
               leading: const Icon(Icons.science_outlined),
-              title: const Text('Transcript → Note (test)'),
+              title: const Text('Paste a transcript'),
               subtitle: const Text(
                   'Paste a transcript, pick a template, generate a note via your configured AI URL.'),
               trailing: const Icon(Icons.chevron_right),
