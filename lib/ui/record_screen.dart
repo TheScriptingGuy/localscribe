@@ -2,10 +2,12 @@ import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
+import 'package:flutter_foreground_task/flutter_foreground_task.dart';
 import 'package:provider/provider.dart';
 import 'package:record/record.dart';
 
 import '../models/recording.dart';
+import '../services/audio/recording_service.dart';
 import '../services/library/recording_store.dart';
 import 'format.dart';
 import 'recording_detail_screen.dart';
@@ -38,11 +40,31 @@ class _RecordScreenState extends State<RecordScreen> {
   String? _error;
 
   @override
+  void initState() {
+    super.initState();
+    FlutterForegroundTask.addTaskDataCallback(_onNotificationAction);
+  }
+
+  @override
   void dispose() {
+    FlutterForegroundTask.removeTaskDataCallback(_onNotificationAction);
     _ticker?.cancel();
     _ampSub?.cancel();
     _recorder.dispose();
+    RecordingService.stop();
     super.dispose();
+  }
+
+  /// Pause/Resume/Stop pressed on the recording notification.
+  void _onNotificationAction(Object data) {
+    if (!_recording) return;
+    switch (data) {
+      case RecordingAction.pause when !_paused:
+      case RecordingAction.resume when _paused:
+        _togglePause();
+      case RecordingAction.stop:
+        _stop();
+    }
   }
 
   Future<void> _start() async {
@@ -52,12 +74,22 @@ class _RecordScreenState extends State<RecordScreen> {
     }
     final store = context.read<RecordingStore>();
     final path = await store.newTempAudioPath('m4a');
+    // Start the foreground service first so the mic stays live with the
+    // screen off. If it fails, record anyway — just foreground-only.
+    String? serviceWarning;
+    try {
+      await RecordingService.start();
+    } catch (e) {
+      serviceWarning = 'Background recording unavailable ($e); keep the app open.';
+    }
     try {
       await _recorder.start(_config, path: path);
     } catch (e) {
+      await RecordingService.stop();
       setState(() => _error = 'Could not start recording: $e');
       return;
     }
+    _error = serviceWarning;
     _elapsed
       ..reset()
       ..start();
@@ -72,7 +104,6 @@ class _RecordScreenState extends State<RecordScreen> {
     setState(() {
       _recording = true;
       _paused = false;
-      _error = null;
     });
   }
 
@@ -85,6 +116,7 @@ class _RecordScreenState extends State<RecordScreen> {
       _elapsed.stop();
     }
     setState(() => _paused = !_paused);
+    await RecordingService.setPaused(_paused);
   }
 
   Future<void> _stop() async {
@@ -94,6 +126,7 @@ class _RecordScreenState extends State<RecordScreen> {
     _ticker?.cancel();
     await _ampSub?.cancel();
     final path = await _recorder.stop();
+    await RecordingService.stop();
     if (path == null) {
       setState(() {
         _recording = false;
@@ -117,6 +150,7 @@ class _RecordScreenState extends State<RecordScreen> {
     _ticker?.cancel();
     await _ampSub?.cancel();
     await _recorder.cancel(); // stops and deletes the temp file
+    await RecordingService.stop();
     if (mounted) Navigator.of(context).pop();
   }
 
@@ -157,7 +191,7 @@ class _RecordScreenState extends State<RecordScreen> {
                       ? 'Ready'
                       : _paused
                           ? 'Paused'
-                          : 'Recording… keep the app open',
+                          : 'Recording — continues with the screen off',
                   style: TextStyle(color: scheme.outline),
                 ),
                 if (_error != null) ...[

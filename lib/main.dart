@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
+import 'services/audio/recording_service.dart';
 import 'services/library/recording_store.dart';
 import 'services/templates/template_repository.dart';
 import 'settings/settings.dart';
@@ -10,6 +11,7 @@ import 'ui/templates_screen.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  RecordingService.init();
 
   final settings = Settings();
   await settings.load();
