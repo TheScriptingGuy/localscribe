@@ -1,0 +1,27 @@
+// Release signing for CI. Applied at the end of android/app/build.gradle(.kts)
+// so it overrides the debug signing `flutter create` sets up. The keystore
+// and passwords come from GitHub Actions secrets; without them (forks, local
+// builds) release builds keep the default debug signing.
+def keystore = file('release.p12')
+def password = System.getenv('LS_KEYSTORE_PASSWORD')
+
+if (keystore.exists() && password) {
+    android {
+        signingConfigs {
+            localscribeRelease {
+                storeFile keystore
+                storeType 'pkcs12'
+                storePassword password
+                keyAlias System.getenv('LS_KEY_ALIAS') ?: 'localscribe'
+                keyPassword password
+            }
+        }
+        buildTypes {
+            release {
+                signingConfig signingConfigs.localscribeRelease
+            }
+        }
+    }
+} else {
+    logger.warn('LocalScribe: no release keystore; release APK uses debug signing.')
+}

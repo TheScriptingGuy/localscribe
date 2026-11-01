@@ -27,3 +27,9 @@ Thumbs.db
 *.gguf
 *.ggml
 *.bin
+
+# Signing material never belongs in git (CI gets it from secrets)
+*.p12
+*.jks
+*.keystore
+key.properties

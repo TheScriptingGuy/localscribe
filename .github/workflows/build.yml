@@ -43,6 +43,22 @@ jobs:
           sed -i 's/minSdkVersion flutter.minSdkVersion/minSdkVersion 24/' android/app/build.gradle || true
           sed -i 's/minSdk = flutter.minSdkVersion/minSdk = 24/' android/app/build.gradle.kts || true
 
+      - name: Release signing
+        # A fixed key so each build can update the previous install. Skipped
+        # (debug signing) when the secrets are absent, e.g. on forks.
+        env:
+          LS_KEYSTORE_B64: ${{ secrets.LS_KEYSTORE_B64 }}
+        run: |
+          cp ci/signing.gradle android/app/signing.gradle
+          if [ -f android/app/build.gradle.kts ]; then
+            echo 'apply(from = "signing.gradle")' >> android/app/build.gradle.kts
+          else
+            echo "apply from: 'signing.gradle'" >> android/app/build.gradle
+          fi
+          if [ -n "$LS_KEYSTORE_B64" ]; then
+            echo "$LS_KEYSTORE_B64" | base64 -d > android/app/release.p12
+          fi
+
       - name: Pub get
         run: flutter pub get
 
@@ -51,7 +67,15 @@ jobs:
 
       - name: Build release APK
         # One APK per CPU ABI: arm64-v8a is the one for any modern phone.
+        env:
+          LS_KEYSTORE_PASSWORD: ${{ secrets.LS_KEYSTORE_PASSWORD }}
+          LS_KEY_ALIAS: ${{ secrets.LS_KEY_ALIAS }}
         run: flutter build apk --release --split-per-abi
+
+      - name: Show signing certificate
+        run: |
+          APKSIGNER=$(ls "$ANDROID_HOME"/build-tools/*/apksigner | sort -V | tail -1)
+          "$APKSIGNER" verify --print-certs build/app/outputs/flutter-apk/app-arm64-v8a-release.apk | grep -E "SHA-256|DN"
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
