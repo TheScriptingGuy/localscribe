@@ -28,6 +28,9 @@ construction).
   (optionally) capture from a nearby **Plaud Note** recorder over BLE.
 - **Transcribe** audio — on-device via `whisper.cpp`, or via a Whisper-compatible
   HTTP API URL.
+- **Recognise speakers** (Speaker 1, Speaker 2, … renamable to real names) in
+  any language — on-device via `sherpa-onnx`, or via a speaker-recognition
+  server you host (`server/diarization/`).
 - **Generate AI notes** from a transcript using **templates** (Plaud-style
   defaults + your own), either on-device via `llama.cpp` (GGUF) or via an
   OpenAI-/Anthropic-compatible API URL.
@@ -56,6 +59,7 @@ lib/
 assets/templates/*.json          default note templates
 packages/localscribe_native/     FFI plugin: whisper.cpp (git submodule) +
                                  NDK MediaCodec audio decoding, built by CMake
+server/diarization/              optional self-hosted speaker-recognition API
 ```
 
 ### On-device transcription
@@ -72,15 +76,41 @@ Hugging Face repository, resume if interrupted, and are verified by SHA-256.
 The arm64 build targets ARMv8.2-A + FP16 (most phones from 2018 on); the app
 checks `/proc/cpuinfo` and explains when a phone can't run it.
 
+### Speaker recognition
+
+Optional (Options → Speaker recognition). After whisper produces the text,
+a separate step works out **who spoke when** from the voices alone, so it
+works for every language whisper supports, mixed-language meetings included:
+
+1. **pyannote segmentation 3.0** finds speech and the points where the voice
+   changes;
+2. **WeSpeaker ResNet34-LM** turns each stretch into a voice fingerprint;
+3. clustering groups the fingerprints into speakers (count detected
+   automatically, or set it when you know it).
+
+On-device this runs through [`sherpa-onnx`](https://github.com/k2-fsa/sherpa-onnx);
+the two models (32 MB) download in-app like the whisper models. With **Custom
+API URL** the app uploads the audio to a server you run instead — see
+[`server/diarization/`](server/diarization/) for a ready-made one (same
+models on CPU, or pyannote's own pipeline on a GPU) and the small JSON API.
+
+The app then matches the voices to the transcript: whisper's word timings let
+it split a sentence exactly where the speaker changes. Tap a speaker label to
+name them; picking another speaker's name merges the two. Notes and Ask-AI get
+the transcript as `Name: text` lines.
+
+Speakers are per recording (Speaker 1 in two recordings may be different
+people). Overlapping speech and very short replies are the usual mistakes.
+
 ### AI backend model (the core abstraction)
 
 Each pipeline (Transcription, Note AI, Ask-AI) is configured independently as one
 of:
 
-| Mode | Transcription | Note AI / Ask-AI |
-|---|---|---|
-| **On-device** | `whisper.cpp` (GGML model) | `llama.cpp` (GGUF model) |
-| **Custom API URL** | OpenAI-compatible `/v1/audio/transcriptions` | OpenAI-compatible `/v1/chat/completions` **or** Anthropic `/v1/messages` |
+| Mode | Transcription | Speaker recognition | Note AI / Ask-AI |
+|---|---|---|---|
+| **On-device** | `whisper.cpp` (GGML model) | `sherpa-onnx` (pyannote + WeSpeaker) | `llama.cpp` (GGUF model) |
+| **Custom API URL** | OpenAI-compatible `/v1/audio/transcriptions` | `POST /diarize` ([server/diarization](server/diarization/)) | OpenAI-compatible `/v1/chat/completions` **or** Anthropic `/v1/messages` |
 
 The OpenAI-compatible option also covers Ollama, LM Studio, llama.cpp `server`,
 vLLM, LocalAI, OpenRouter, Groq — just change the base URL.
@@ -115,6 +145,7 @@ and run `flutter build apk --release`.
 - **Phase 2 ✅** phone-mic recording (background service) + file import wired to
   the transcribe→note flow, Ask-AI chat.
 - **Phase 3 ✅** on-device `whisper.cpp` (FFI + NDK build in CI) + model downloader.
+  Speaker recognition on-device (`sherpa-onnx`) or via a self-hosted API.
 - **Phase 4:** on-device `llama.cpp` (GGUF) notes + Ask-AI chat.
 - **Phase 5:** Plaud BLE live capture (RSA handshake + ChaCha20-Poly1305 + Opus).
 

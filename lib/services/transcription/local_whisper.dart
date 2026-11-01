@@ -57,7 +57,7 @@ class LocalWhisperTranscriber implements Transcriber {
     final segments = ((result['segments'] as List?) ?? const [])
         .map((e) => TranscriptSegment.fromJson(Map<String, dynamic>.from(e)))
         .map((s) => TranscriptSegment(
-            start: s.start, end: s.end, text: s.text.trim()))
+            start: s.start, end: s.end, text: s.text.trim(), words: s.words))
         .where((s) => s.text.isNotEmpty)
         .toList();
     return TranscriptResult(

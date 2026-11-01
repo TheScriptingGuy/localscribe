@@ -7,6 +7,7 @@ import 'package:path/path.dart' as p;
 import 'package:provider/provider.dart';
 
 import '../models/recording.dart';
+import '../services/ai/ai_types.dart';
 import '../services/library/recording_store.dart';
 import '../services/transcription/transcription_jobs.dart';
 import 'format.dart';
@@ -102,6 +103,7 @@ class RecordingsScreen extends StatelessWidget {
                 recording: r,
                 transcribing:
                     jobs.isRunning(r.id) ? (jobs.progressOf(r.id) ?? 0) : null,
+                phase: jobs.phaseOf(r.id)?.label,
               ),
               const Divider(height: 1, indent: 24, endIndent: 24),
             ],
@@ -117,7 +119,9 @@ class _RecordingRow extends StatelessWidget {
 
   /// Transcription progress 0..1 while a job runs, else null.
   final double? transcribing;
-  const _RecordingRow({required this.recording, this.transcribing});
+  final String? phase;
+  const _RecordingRow(
+      {required this.recording, this.transcribing, this.phase});
 
   @override
   Widget build(BuildContext context) {
@@ -157,10 +161,16 @@ class _RecordingRow extends StatelessWidget {
                       child: CircularProgressIndicator(strokeWidth: 1.5),
                     ),
                     const SizedBox(width: 8),
-                    Text('Transcribing ${(t * 100).floor()}%', style: meta),
+                    Text('${phase ?? 'Transcribing'} ${(t * 100).floor()}%',
+                        style: meta),
                   ] else ...[
                     if (r.transcript != null)
                       const _Badge(icon: Icons.subject, label: 'Transcript'),
+                    if (_speakerCount(r) > 0)
+                      _Badge(
+                        icon: Icons.people_outline,
+                        label: '${_speakerCount(r)} speakers',
+                      ),
                     if (r.notes.isNotEmpty)
                       _Badge(
                         icon: Icons.edit_note,
@@ -187,6 +197,12 @@ class _RecordingRow extends StatelessWidget {
     );
   }
 }
+
+/// Distinct speakers (by display name, so merged ones count once).
+int _speakerCount(Recording r) => {
+      for (final s in r.transcript?.segments ?? const <TranscriptSegment>[])
+        if (s.speaker != null) r.speakerName(s.speaker!),
+    }.length;
 
 class _MetaSeparator extends StatelessWidget {
   const _MetaSeparator();

@@ -3,6 +3,7 @@ import 'package:provider/provider.dart';
 
 import 'services/audio/recording_service.dart';
 import 'services/library/recording_store.dart';
+import 'services/models/speaker_models.dart';
 import 'services/models/whisper_models.dart';
 import 'services/templates/template_repository.dart';
 import 'services/transcription/transcription_jobs.dart';
@@ -28,13 +29,21 @@ Future<void> main() async {
   final models = WhisperModelManager();
   await models.load();
 
+  final speakerModels = SpeakerModelManager();
+  await speakerModels.load();
+
   runApp(LocalScribeApp(
     settings: settings,
     templates: templates,
     recordings: recordings,
     models: models,
+    speakerModels: speakerModels,
     jobs: TranscriptionJobs(
-        store: recordings, settings: settings, models: models),
+      store: recordings,
+      settings: settings,
+      models: models,
+      speakerModels: speakerModels,
+    ),
   ));
 }
 
@@ -43,6 +52,7 @@ class LocalScribeApp extends StatelessWidget {
   final TemplateRepository templates;
   final RecordingStore recordings;
   final WhisperModelManager models;
+  final SpeakerModelManager speakerModels;
   final TranscriptionJobs jobs;
 
   const LocalScribeApp({
@@ -51,6 +61,7 @@ class LocalScribeApp extends StatelessWidget {
     required this.templates,
     required this.recordings,
     required this.models,
+    required this.speakerModels,
     required this.jobs,
   });
 
@@ -62,6 +73,7 @@ class LocalScribeApp extends StatelessWidget {
         Provider.value(value: templates),
         ChangeNotifierProvider.value(value: recordings),
         ChangeNotifierProvider.value(value: models),
+        ChangeNotifierProvider.value(value: speakerModels),
         ChangeNotifierProvider.value(value: jobs),
       ],
       child: MaterialApp(

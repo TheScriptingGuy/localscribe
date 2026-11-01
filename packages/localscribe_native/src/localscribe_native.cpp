@@ -1,5 +1,6 @@
 // LocalScribe native layer: decodes any audio file Android can play (NDK
-// MediaCodec) to 16 kHz mono PCM and transcribes it with whisper.cpp.
+// MediaCodec) to 16 kHz mono PCM and transcribes it with whisper.cpp. The
+// decoder is also exposed on its own for speaker recognition (sherpa-onnx).
 // Exposed as a small C API for Dart FFI; see lib/localscribe_native.dart.
 
 #include <android/log.h>
@@ -331,6 +332,43 @@ void on_progress(whisper_context *, whisper_state *, int p, void *user) {
 
 bool on_abort(void *user) { return ((Job *)user)->cancel.load(); }
 
+// Appends `,"words":[[start,end,"text"],...]` for segment `seg`. Tokens that
+// begin with a space start a new word; punctuation sticks to its word.
+// Speaker recognition uses these to split a segment where the voice changes.
+void append_words(std::string &out, whisper_context *ctx, int seg, double offset) {
+    const whisper_token eot = whisper_token_eot(ctx);
+    out += ",\"words\":[";
+    std::string word;
+    double w0 = -1, w1 = 0;
+    bool first = true;
+    auto flush = [&] {
+        const size_t b = word.find_first_not_of(' ');
+        if (b != std::string::npos && w0 >= 0) {
+            char t[64];
+            snprintf(t, sizeof t, "%s[%.2f,%.2f,", first ? "" : ",", w0, w1);
+            out += t;
+            json_str(out, word.c_str() + b);
+            out += ']';
+            first = false;
+        }
+        word.clear();
+        w0 = -1;
+    };
+    const int n = whisper_full_n_tokens(ctx, seg);
+    for (int j = 0; j < n; ++j) {
+        const whisper_token_data td = whisper_full_get_token_data(ctx, seg, j);
+        if (td.id >= eot) continue; // special and timestamp tokens
+        const char *txt = whisper_full_get_token_text(ctx, seg, j);
+        if (!txt || !*txt) continue;
+        if (txt[0] == ' ' && !word.empty()) flush();
+        if (w0 < 0) w0 = offset + td.t0 / 100.0;
+        w1 = offset + td.t1 / 100.0;
+        word += txt;
+    }
+    flush();
+    out += ']';
+}
+
 void on_log(ggml_log_level level, const char *text, void *) {
     if (level == GGML_LOG_LEVEL_ERROR) {
         LOGE("%s", text);
@@ -346,14 +384,36 @@ std::once_flag g_log_once;
 LS_API void *ls_job_new() { return new Job(); }
 LS_API int ls_job_progress(void *job) { return ((Job *)job)->progress.load(); }
 LS_API void ls_job_cancel(void *job) { ((Job *)job)->cancel = true; }
+LS_API int ls_job_cancelled(void *job) { return ((Job *)job)->cancel.load() ? 1 : 0; }
+LS_API void ls_job_set_progress(void *job, int permille) {
+    ((Job *)job)->progress = std::max(0, std::min(1000, permille));
+}
 LS_API void ls_job_free(void *job) { delete (Job *)job; }
 LS_API void ls_free_string(char *s) { free(s); }
 LS_API const char *ls_system_info() { return whisper_print_system_info(); }
 
+// Decodes `audio_path` to 16 kHz mono 16-bit PCM in `pcm_path` (kept for the
+// caller to read and delete). Progress goes 0-100 permille. Returns
+// {"samples":N} or {"error":"…"}; free with ls_free_string.
+LS_API char *ls_decode(const char *audio_path, const char *pcm_path, void *job_ptr) {
+    Job local;
+    Job *job = job_ptr ? (Job *)job_ptr : &local;
+    std::string err;
+    const int64_t total = decode_to_pcm(audio_path, pcm_path, job, err);
+    if (total < 0) {
+        unlink(pcm_path);
+        return json_error(err);
+    }
+    char buf[48];
+    snprintf(buf, sizeof buf, "{\"samples\":%lld}", (long long)total);
+    return strdup(buf);
+}
+
 // Transcribes `audio_path` with the GGML model at `model_path`. `pcm_path` is a
 // scratch file for the decoded audio (deleted afterwards). `language` is an
 // ISO code or "auto". Returns a malloc'd JSON string, free with ls_free_string:
-//   {"language":"en","segments":[{"start":0.0,"end":2.5,"text":"…"}]}
+//   {"language":"en","segments":[{"start":0.0,"end":2.5,"text":"…",
+//                                 "words":[[0.0,0.4,"Hello"],…]}]}
 // or {"error":"…"} ("cancelled" after ls_job_cancel).
 LS_API char *ls_transcribe(const char *model_path, const char *audio_path, const char *pcm_path,
                            const char *language, int n_threads, void *job_ptr) {
@@ -411,6 +471,7 @@ LS_API char *ls_transcribe(const char *model_path, const char *audio_path, const
         wp.print_realtime = false;
         wp.print_timestamps = false;
         wp.print_special = false;
+        wp.token_timestamps = true;
 
         ProgressCtx pc{job, kDecodeShare + (int)((1000 - kDecodeShare) * pos / total),
                        (int)((1000 - kDecodeShare) * (int64_t)use / total)};
@@ -440,6 +501,7 @@ LS_API char *ls_transcribe(const char *model_path, const char *audio_path, const
             first = false;
             out += times;
             json_str(out, whisper_full_get_segment_text(ctx, i));
+            append_words(out, ctx, i, offset);
             out += '}';
         }
         pos += (int64_t)use;

@@ -1,4 +1,8 @@
 import '../../models/ai_config.dart';
+import '../diarization/diarizer.dart';
+import '../diarization/local_diarizer.dart';
+import '../diarization/remote_diarizer.dart';
+import '../models/speaker_models.dart';
 import '../models/whisper_models.dart';
 import '../notes/anthropic_generator.dart';
 import '../notes/note_generator.dart';
@@ -25,6 +29,24 @@ class AiFactory {
       throw AiException('No transcription API URL configured.');
     }
     return RemoteWhisperTranscriber(c.remote);
+  }
+
+  static Diarizer diarizer(SpeakerConfig c,
+      {required SpeakerModelManager models}) {
+    if (c.onDevice) {
+      if (!models.ready) {
+        throw AiException('Speaker models are not downloaded yet. Open '
+            'Options > Speaker recognition to download them.');
+      }
+      return LocalDiarizer(
+        segmentationModel: models.fileOf(speakerSegmentationModel),
+        embeddingModel: models.fileOf(speakerEmbeddingModel),
+      );
+    }
+    if (c.remote.baseUrl.trim().isEmpty) {
+      throw AiException('No speaker recognition API URL configured.');
+    }
+    return RemoteDiarizer(c.remote);
   }
 
   static NoteGenerator noteGenerator(NoteAiConfig c) {

@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import '../models/ai_config.dart';
+import '../services/models/model_manager.dart';
+import '../services/models/speaker_models.dart';
 import '../services/models/whisper_models.dart';
 import '../settings/settings.dart';
 import 'models_screen.dart';
@@ -46,6 +48,7 @@ class _OptionsScreenState extends State<OptionsScreen> {
     final settings = context.watch<Settings>();
     final t = settings.transcription;
     final n = settings.noteAi;
+    final sp = settings.speakers;
 
     return Scaffold(
       appBar: AppBar(),
@@ -93,6 +96,61 @@ class _OptionsScreenState extends State<OptionsScreen> {
                 'Groq, or a self-hosted whisper.cpp HTTP server.'),
           ] else
             _localModelTile(context, t),
+          const Divider(height: 40),
+          _sectionTitle(context, 'Speaker recognition'),
+          SwitchListTile(
+            contentPadding: EdgeInsets.zero,
+            title: const Text('Recognise speakers'),
+            subtitle: const Text(
+                'Label who is talking (Speaker 1, Speaker 2, …) after '
+                'transcribing. Works for any language.'),
+            value: sp.enabled,
+            onChanged: (v) {
+              sp.enabled = v;
+              settings.save();
+            },
+          ),
+          if (sp.enabled) ...[
+            _modeToggle(
+              onDevice: sp.onDevice,
+              onChanged: (v) {
+                sp.onDevice = v;
+                settings.save();
+              },
+              onDeviceLabel: 'On-device (sherpa-onnx)',
+            ),
+            const SizedBox(height: 8),
+            DropdownButtonFormField<int>(
+              initialValue: sp.numSpeakers <= 8 ? sp.numSpeakers : 0,
+              decoration:
+                  const InputDecoration(labelText: 'Number of speakers'),
+              items: [
+                const DropdownMenuItem(
+                    value: 0, child: Text('Detect automatically')),
+                for (var i = 2; i <= 8; i++)
+                  DropdownMenuItem(value: i, child: Text('$i speakers')),
+              ],
+              onChanged: (v) {
+                if (v == null) return;
+                sp.numSpeakers = v;
+                settings.save();
+              },
+            ),
+            if (sp.onDevice)
+              _speakerModelsTile(context)
+            else ...[
+              _field('Speaker API URL', sp.remote.baseUrl,
+                  hint: 'http://192.168.1.20:8090',
+                  onChanged: (v) => sp.remote.baseUrl = v),
+              _field('API key', sp.remote.apiKey,
+                  obscure: true, onChanged: (v) => sp.remote.apiKey = v),
+              const _Hint(
+                  'A server you host that answers POST /diarize with who '
+                  'spoke when. A ready-made one (same models, or pyannote on '
+                  'a GPU) is in the LocalScribe repository under '
+                  'server/diarization.'),
+            ],
+          ],
           const Divider(height: 40),
           _sectionTitle(context, 'Note AI  &  Ask-AI chat'),
           _modeToggle(
@@ -171,6 +229,61 @@ class _OptionsScreenState extends State<OptionsScreen> {
         trailing: const Icon(Icons.chevron_right),
         onTap: () => Navigator.push(context,
             MaterialPageRoute(builder: (_) => const ModelsScreen())),
+      ),
+    );
+  }
+
+  Widget _speakerModelsTile(BuildContext context) {
+    final m = context.watch<SpeakerModelManager>();
+    final error = m.ready || m.downloading ? null : m.error;
+    final String status;
+    final Widget trailing;
+    if (m.ready) {
+      status = '${formatBytes(m.totalBytes)} · audio stays on this phone';
+      trailing = IconButton(
+        tooltip: 'Delete',
+        icon: const Icon(Icons.delete_outline),
+        onPressed: m.deleteAll,
+      );
+    } else if (m.downloading) {
+      status = 'Downloading ${(m.progress * 100).floor()}%';
+      trailing = IconButton(
+        tooltip: 'Stop',
+        icon: const Icon(Icons.close),
+        onPressed: m.cancelAll,
+      );
+    } else {
+      status = error ??
+          '${formatBytes(m.totalBytes)} · download once, then works offline';
+      trailing = IconButton(
+        tooltip: 'Download',
+        icon: const Icon(Icons.download),
+        onPressed: m.downloadAll,
+      );
+    }
+    return Card(
+      margin: const EdgeInsets.only(top: 12),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          ListTile(
+            leading: Icon(
+                m.ready ? Icons.record_voice_over : Icons.download_outlined),
+            title: Text(m.ready ? 'Speaker models ready' : 'Speaker models'),
+            subtitle: Text(
+              status,
+              style: error != null
+                  ? TextStyle(color: Theme.of(context).colorScheme.error)
+                  : null,
+            ),
+            trailing: trailing,
+          ),
+          if (m.downloading)
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
+              child: LinearProgressIndicator(value: m.progress),
+            ),
+        ],
       ),
     );
   }

@@ -63,7 +63,7 @@ class _RecordingDetailScreenState extends State<RecordingDetailScreen> {
     final settings = context.read<Settings>();
     final store = context.read<RecordingStore>();
     final templates = context.read<TemplateRepository>();
-    final transcript = rec.transcript?.text ?? '';
+    final transcript = rec.transcriptForAi;
     if (transcript.isEmpty) {
       setState(() => _error = 'Transcribe the recording first.');
       return;
@@ -127,6 +127,68 @@ class _RecordingDetailScreenState extends State<RecordingDetailScreen> {
     setState(() {
       rec.notes.removeWhere((e) => e.id == note.id);
       _noteIndex = 0;
+    });
+    await store.save(rec);
+  }
+
+  /// Names a recognised speaker everywhere in this recording. Picking another
+  /// speaker's name merges the two.
+  Future<void> _renameSpeaker(Recording rec, String id) async {
+    final store = context.read<RecordingStore>();
+    final ctrl = TextEditingController(text: rec.speakerNames[id] ?? '');
+    final current = rec.speakerName(id);
+    final others = {
+      for (final s in rec.transcript?.segments ?? const <TranscriptSegment>[])
+        if (s.speaker != null) rec.speakerName(s.speaker!),
+    }.where((n) => n != current).toList();
+    final name = await showDialog<String>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text('Rename $current'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            TextField(
+              controller: ctrl,
+              autofocus: true,
+              textCapitalization: TextCapitalization.words,
+              decoration: const InputDecoration(hintText: 'Name, e.g. Anna'),
+              onSubmitted: (v) => Navigator.pop(ctx, v.trim()),
+            ),
+            if (others.isNotEmpty) ...[
+              const SizedBox(height: 16),
+              const Text('Or the same person as:',
+                  style: TextStyle(color: Palette.muted)),
+              const SizedBox(height: 8),
+              Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                children: [
+                  for (final o in others)
+                    ActionChip(
+                        label: Text(o), onPressed: () => Navigator.pop(ctx, o)),
+                ],
+              ),
+            ],
+          ],
+        ),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
+          TextButton(
+              onPressed: () => Navigator.pop(ctx, ctrl.text.trim()),
+              child: const Text('Save')),
+        ],
+      ),
+    );
+    if (name == null) return;
+    setState(() {
+      if (name.isEmpty) {
+        rec.speakerNames.remove(id);
+      } else {
+        rec.speakerNames[id] = name;
+      }
     });
     await store.save(rec);
   }
@@ -245,6 +307,9 @@ class _RecordingDetailScreenState extends State<RecordingDetailScreen> {
                     _copy(transcript?.text ?? '', 'Transcript');
                   case 'retranscribe':
                     _transcribe(rec);
+                  case 'speakers':
+                    setState(() => _error = null);
+                    jobs.identifySpeakers(rec);
                   case 'delete':
                     _delete(rec);
                 }
@@ -254,9 +319,15 @@ class _RecordingDetailScreenState extends State<RecordingDetailScreen> {
                 if (transcript != null)
                   const PopupMenuItem(
                       value: 'copy', child: Text('Copy transcript')),
-                if (transcript != null && !jobs.isRunning(rec.id))
+                if (transcript != null && !jobs.isRunning(rec.id)) ...[
                   const PopupMenuItem(
                       value: 'retranscribe', child: Text('Transcribe again')),
+                  PopupMenuItem(
+                      value: 'speakers',
+                      child: Text(transcript.hasSpeakers
+                          ? 'Identify speakers again'
+                          : 'Identify speakers')),
+                ],
                 const PopupMenuItem(value: 'delete', child: Text('Delete')),
               ],
             ),
@@ -296,6 +367,7 @@ class _RecordingDetailScreenState extends State<RecordingDetailScreen> {
     final Widget content;
     if (jobs.isRunning(rec.id)) {
       content = _TranscribeProgress(
+        label: jobs.phaseOf(rec.id)?.label ?? 'Transcribing',
         progress: jobs.progressOf(rec.id),
         onCancel: () => jobs.cancel(rec.id),
       );
@@ -319,9 +391,15 @@ class _RecordingDetailScreenState extends State<RecordingDetailScreen> {
       content = Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          for (final para in _paragraphs(t.segments))
+          for (final para in _paragraphs(rec, t.segments))
             _TranscriptParagraph(
               start: para.first.start,
+              speaker: para.first.speaker == null
+                  ? null
+                  : rec.speakerName(para.first.speaker!),
+              onSpeakerTap: para.first.speaker == null
+                  ? null
+                  : () => _renameSpeaker(rec, para.first.speaker!),
               text: para.map((s) => s.text.trim()).join(' '),
               onTap: () {
                 _player.seek(
@@ -358,10 +436,13 @@ class _RecordingDetailScreenState extends State<RecordingDetailScreen> {
     );
   }
 
-  /// Groups whisper segments into readable paragraphs: break on a pause of
-  /// 2 s+, or once a paragraph is long and the last segment ends a sentence.
+  /// Groups segments into readable paragraphs: break when the speaker
+  /// changes, on a pause of 2 s+, or once a paragraph is long and the last
+  /// segment ends a sentence.
   static List<List<TranscriptSegment>> _paragraphs(
-      List<TranscriptSegment> segments) {
+      Recording rec, List<TranscriptSegment> segments) {
+    String? nameOf(TranscriptSegment s) =>
+        s.speaker == null ? null : rec.speakerName(s.speaker!);
     final out = <List<TranscriptSegment>>[];
     var current = <TranscriptSegment>[];
     var chars = 0;
@@ -370,7 +451,9 @@ class _RecordingDetailScreenState extends State<RecordingDetailScreen> {
         final gap = s.start - current.last.end;
         final endsSentence =
             RegExp(r'[.!?…]["”’)]?$').hasMatch(current.last.text.trim());
-        if (gap >= 2 || (chars > 280 && endsSentence)) {
+        if (nameOf(s) != nameOf(current.last) ||
+            gap >= 2 ||
+            (chars > 280 && endsSentence)) {
           out.add(current);
           current = [];
           chars = 0;
@@ -517,13 +600,21 @@ class _NoteTab extends StatelessWidget {
 
 class _TranscriptParagraph extends StatelessWidget {
   final double start;
+  final String? speaker;
+  final VoidCallback? onSpeakerTap;
   final String text;
   final VoidCallback onTap;
-  const _TranscriptParagraph(
-      {required this.start, required this.text, required this.onTap});
+  const _TranscriptParagraph({
+    required this.start,
+    required this.text,
+    required this.onTap,
+    this.speaker,
+    this.onSpeakerTap,
+  });
 
   @override
   Widget build(BuildContext context) {
+    final name = speaker;
     return InkWell(
       onTap: onTap,
       borderRadius: BorderRadius.circular(8),
@@ -532,13 +623,32 @@ class _TranscriptParagraph extends StatelessWidget {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text(
-              formatSeconds(start),
-              style: const TextStyle(
-                color: Palette.muted,
-                fontSize: 14,
-                fontFeatures: [FontFeature.tabularFigures()],
-              ),
+            Row(
+              children: [
+                Text(
+                  formatSeconds(start),
+                  style: const TextStyle(
+                    color: Palette.muted,
+                    fontSize: 14,
+                    fontFeatures: [FontFeature.tabularFigures()],
+                  ),
+                ),
+                if (name != null) ...[
+                  const SizedBox(width: 16),
+                  InkWell(
+                    onTap: onSpeakerTap,
+                    borderRadius: BorderRadius.circular(6),
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(vertical: 2),
+                      child: Text(
+                        name,
+                        style: const TextStyle(
+                            fontSize: 15, fontWeight: FontWeight.w600),
+                      ),
+                    ),
+                  ),
+                ],
+              ],
             ),
             const SizedBox(height: 4),
             Text(text, style: Theme.of(context).textTheme.bodyLarge),
@@ -705,7 +815,7 @@ class _ChatScreenState extends State<_ChatScreen> {
     try {
       final gen = AiFactory.noteGenerator(settings.noteAi);
       final messages = PromptBuilder.forChat(
-        transcript: rec.transcript!.text,
+        transcript: rec.transcriptForAi,
         history: history,
         question: question,
       );
@@ -837,9 +947,11 @@ class _Bubble extends StatelessWidget {
 }
 
 class _TranscribeProgress extends StatelessWidget {
+  final String label;
   final double? progress;
   final VoidCallback onCancel;
-  const _TranscribeProgress({required this.progress, required this.onCancel});
+  const _TranscribeProgress(
+      {required this.label, required this.progress, required this.onCancel});
 
   @override
   Widget build(BuildContext context) {
@@ -850,7 +962,7 @@ class _TranscribeProgress extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Text(
-            p == null ? 'Transcribing…' : 'Transcribing… ${(p * 100).floor()}%',
+            p == null ? '$label…' : '$label… ${(p * 100).floor()}%',
             style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w600),
           ),
           const SizedBox(height: 16),

@@ -18,6 +18,8 @@ typedef _TranscribeC = Pointer<Utf8> Function(Pointer<Utf8>, Pointer<Utf8>,
     Pointer<Utf8>, Pointer<Utf8>, Int32, Pointer<Void>);
 typedef _TranscribeDart = Pointer<Utf8> Function(Pointer<Utf8>, Pointer<Utf8>,
     Pointer<Utf8>, Pointer<Utf8>, int, Pointer<Void>);
+typedef _DecodeFn = Pointer<Utf8> Function(
+    Pointer<Utf8>, Pointer<Utf8>, Pointer<Void>);
 
 final class _Bindings {
   _Bindings(DynamicLibrary lib)
@@ -29,6 +31,12 @@ final class _Bindings {
             void Function(Pointer<Void>)>('ls_job_cancel'),
         jobFree = lib.lookupFunction<Void Function(Pointer<Void>),
             void Function(Pointer<Void>)>('ls_job_free'),
+        jobCancelled = lib.lookupFunction<Int32 Function(Pointer<Void>),
+            int Function(Pointer<Void>)>('ls_job_cancelled'),
+        jobSetProgress = lib.lookupFunction<
+            Void Function(Pointer<Void>, Int32),
+            void Function(Pointer<Void>, int)>('ls_job_set_progress'),
+        decode = lib.lookupFunction<_DecodeFn, _DecodeFn>('ls_decode'),
         freeString = lib.lookupFunction<Void Function(Pointer<Utf8>),
             void Function(Pointer<Utf8>)>('ls_free_string'),
         systemInfo = lib.lookupFunction<Pointer<Utf8> Function(),
@@ -40,6 +48,9 @@ final class _Bindings {
   final int Function(Pointer<Void>) jobProgress;
   final void Function(Pointer<Void>) jobCancel;
   final void Function(Pointer<Void>) jobFree;
+  final int Function(Pointer<Void>) jobCancelled;
+  final void Function(Pointer<Void>, int) jobSetProgress;
+  final _DecodeFn decode;
   final void Function(Pointer<Utf8>) freeString;
   final Pointer<Utf8> Function() systemInfo;
   final _TranscribeDart transcribe;
@@ -63,6 +74,27 @@ class WhisperJob {
   final Future<Map<String, dynamic>> result;
   final void Function() _cancel;
   void cancel() => _cancel();
+}
+
+/// A progress/cancel handle that background isolates reach by [address]
+/// (pointers can't be sent between isolates, addresses can).
+class NativeJob {
+  NativeJob() : _ptr = _bindings.jobNew();
+  final Pointer<Void> _ptr;
+
+  int get address => _ptr.address;
+
+  /// 0.0–1.0, as last reported by the worker.
+  double get progress => _bindings.jobProgress(_ptr) / 1000;
+  void cancel() => _bindings.jobCancel(_ptr);
+  void free() => _bindings.jobFree(_ptr);
+
+  static void setProgress(int address, double progress) =>
+      _bindings.jobSetProgress(
+          Pointer.fromAddress(address), (progress * 1000).round());
+
+  static bool isCancelled(int address) =>
+      _bindings.jobCancelled(Pointer.fromAddress(address)) != 0;
 }
 
 class LocalScribeNative {
@@ -95,6 +127,30 @@ class LocalScribeNative {
           .hasMatch(info);
     } catch (_) {
       return false;
+    }
+  }
+
+  /// Decodes [audioPath] to 16 kHz mono 16-bit PCM at [pcmPath] and returns
+  /// the number of samples; the caller deletes the file. Reports progress to
+  /// the job at [jobAddress] as 0–0.1. Blocking: call from a background
+  /// isolate. Throws [WhisperException] (`cancelled` after a cancel).
+  static int decodeToPcmSync({
+    required String audioPath,
+    required String pcmPath,
+    required int jobAddress,
+  }) {
+    final a = audioPath.toNativeUtf8();
+    final pcm = pcmPath.toNativeUtf8();
+    try {
+      final r = _bindings.decode(a, pcm, Pointer.fromAddress(jobAddress));
+      final json = r.toDartString();
+      _bindings.freeString(r);
+      final map = jsonDecode(json) as Map;
+      if (map['error'] != null) throw WhisperException(map['error'].toString());
+      return (map['samples'] as num).toInt();
+    } finally {
+      malloc.free(a);
+      malloc.free(pcm);
     }
   }
 

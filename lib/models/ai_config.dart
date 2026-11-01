@@ -142,3 +142,55 @@ class NoteAiConfig {
             : RemoteChatConfig(),
       );
 }
+
+/// Self-hosted speaker-recognition endpoint (see server/diarization/):
+/// `POST <baseUrl>/diarize` with the audio, returns who spoke when.
+class RemoteDiarizationConfig {
+  String baseUrl;
+  String apiKey;
+
+  RemoteDiarizationConfig({this.baseUrl = '', this.apiKey = ''});
+
+  Map<String, dynamic> toJson() => {'baseUrl': baseUrl, 'apiKey': apiKey};
+
+  factory RemoteDiarizationConfig.fromJson(Map<String, dynamic> j) =>
+      RemoteDiarizationConfig(
+        baseUrl: j['baseUrl'] ?? '',
+        apiKey: j['apiKey'] ?? '',
+      );
+}
+
+/// Speaker recognition ("Speaker 1 / Speaker 2"), run after transcription:
+/// on-device with sherpa-onnx OR a self-hosted API URL.
+class SpeakerConfig {
+  bool enabled;
+  bool onDevice;
+
+  /// Expected number of speakers; 0 = detect automatically.
+  int numSpeakers;
+  RemoteDiarizationConfig remote;
+
+  SpeakerConfig({
+    this.enabled = false,
+    this.onDevice = true,
+    this.numSpeakers = 0,
+    RemoteDiarizationConfig? remote,
+  }) : remote = remote ?? RemoteDiarizationConfig();
+
+  Map<String, dynamic> toJson() => {
+        'enabled': enabled,
+        'onDevice': onDevice,
+        'numSpeakers': numSpeakers,
+        'remote': remote.toJson(),
+      };
+
+  factory SpeakerConfig.fromJson(Map<String, dynamic> j) => SpeakerConfig(
+        enabled: j['enabled'] ?? false,
+        onDevice: j['onDevice'] ?? true,
+        numSpeakers: j['numSpeakers'] ?? 0,
+        remote: j['remote'] != null
+            ? RemoteDiarizationConfig.fromJson(
+                Map<String, dynamic>.from(j['remote']))
+            : RemoteDiarizationConfig(),
+      );
+}

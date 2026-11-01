@@ -11,6 +11,7 @@ class Settings extends ChangeNotifier {
 
   TranscriptionConfig transcription;
   NoteAiConfig noteAi;
+  SpeakerConfig speakers;
 
   /// Default output language for notes ('auto' = follow transcript).
   String noteLanguage;
@@ -18,9 +19,11 @@ class Settings extends ChangeNotifier {
   Settings({
     TranscriptionConfig? transcription,
     NoteAiConfig? noteAi,
+    SpeakerConfig? speakers,
     this.noteLanguage = 'auto',
   })  : transcription = transcription ?? TranscriptionConfig(),
-        noteAi = noteAi ?? NoteAiConfig();
+        noteAi = noteAi ?? NoteAiConfig(),
+        speakers = speakers ?? SpeakerConfig();
 
   Future<void> load() async {
     final prefs = await SharedPreferences.getInstance();
@@ -34,6 +37,10 @@ class Settings extends ChangeNotifier {
       }
       if (j['noteAi'] != null) {
         noteAi = NoteAiConfig.fromJson(Map<String, dynamic>.from(j['noteAi']));
+      }
+      if (j['speakers'] != null) {
+        speakers =
+            SpeakerConfig.fromJson(Map<String, dynamic>.from(j['speakers']));
       }
       noteLanguage = j['noteLanguage'] ?? 'auto';
     } catch (_) {
@@ -49,6 +56,7 @@ class Settings extends ChangeNotifier {
       jsonEncode({
         'transcription': transcription.toJson(),
         'noteAi': noteAi.toJson(),
+        'speakers': speakers.toJson(),
         'noteLanguage': noteLanguage,
       }),
     );

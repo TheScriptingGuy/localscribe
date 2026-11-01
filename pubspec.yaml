@@ -32,6 +32,11 @@ dependencies:
   localscribe_native:
     path: packages/localscribe_native
 
+  # On-device speaker recognition (pyannote segmentation + speaker
+  # embeddings). Pinned: local_diarizer.dart uses its FFI bindings directly.
+  sherpa_onnx: 2.0.1
+  ffi: ^2.1.0
+
   # BLE (Plaud device): package added in Phase 5. flutter_blue_plus 1.x
   # pins compileSdk 33 (breaks current AndroidX) and 2.x changed license.
 

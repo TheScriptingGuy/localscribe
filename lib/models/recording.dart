@@ -58,6 +58,9 @@ class Recording {
   final List<GeneratedNote> notes;
   final List<ChatMessage> chat;
 
+  /// Names given to recognised speakers, by speaker id ("S1" -> "Anna").
+  final Map<String, String> speakerNames;
+
   Recording({
     required this.id,
     required this.title,
@@ -68,10 +71,37 @@ class Recording {
     this.transcript,
     List<GeneratedNote>? notes,
     List<ChatMessage>? chat,
+    Map<String, String>? speakerNames,
   })  : notes = notes ?? [],
-        chat = chat ?? [];
+        chat = chat ?? [],
+        speakerNames = speakerNames ?? {};
 
   Duration get duration => Duration(milliseconds: durationMs);
+
+  /// Display name for a speaker id: the given name, else "Speaker N".
+  String speakerName(String id) =>
+      speakerNames[id] ?? 'Speaker ${id.replaceFirst('S', '')}';
+
+  /// The transcript as fed to note generation and Ask-AI: "Name: text" lines
+  /// when speakers are known, plain text otherwise.
+  String get transcriptForAi {
+    final t = transcript;
+    if (t == null) return '';
+    if (!t.hasSpeakers) return t.text;
+    final b = StringBuffer();
+    String? current;
+    for (final s in t.segments) {
+      final name = s.speaker == null ? null : speakerName(s.speaker!);
+      if (name != current || b.isEmpty) {
+        if (b.isNotEmpty) b.write('\n\n');
+        b.write(name == null ? s.text : '$name: ${s.text}');
+        current = name;
+      } else {
+        b.write(' ${s.text}');
+      }
+    }
+    return b.toString();
+  }
 
   Map<String, dynamic> toJson() => {
         'id': id,
@@ -83,6 +113,7 @@ class Recording {
         'transcript': transcript?.toJson(),
         'notes': notes.map((n) => n.toJson()).toList(),
         'chat': chat.map((m) => m.toJson()).toList(),
+        if (speakerNames.isNotEmpty) 'speakerNames': speakerNames,
       };
 
   factory Recording.fromJson(Map<String, dynamic> j) => Recording(
@@ -103,5 +134,6 @@ class Recording {
         chat: ((j['chat'] as List?) ?? const [])
             .map((e) => ChatMessage.fromJson(Map<String, dynamic>.from(e)))
             .toList(),
+        speakerNames: Map<String, String>.from(j['speakerNames'] ?? const {}),
       );
 }

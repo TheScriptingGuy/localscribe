@@ -1,0 +1,7 @@
+sherpa-onnx==2.0.1
+numpy
+fastapi
+uvicorn
+python-multipart
+# Optional, for --backend pyannote (GPU recommended):
+# pyannote.audio>=3.3
