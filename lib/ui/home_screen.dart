@@ -152,7 +152,7 @@ class _GenerateNoteScreenState extends State<GenerateNoteScreen> {
         padding: const EdgeInsets.all(16),
         children: [
           DropdownButtonFormField<NoteTemplate>(
-            value: _selected,
+            initialValue: _selected,
             decoration: const InputDecoration(
                 labelText: 'Template', border: OutlineInputBorder()),
             items: templates.all

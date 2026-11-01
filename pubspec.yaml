@@ -23,7 +23,7 @@ dependencies:
   sqflite: ^2.3.2
 
   # Audio
-  record: ^5.0.4
+  record: ^7.1.2
   just_audio: ^0.9.36
   file_picker: ^6.1.1
 

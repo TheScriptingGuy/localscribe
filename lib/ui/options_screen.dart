@@ -58,7 +58,7 @@ class _OptionsScreenState extends State<OptionsScreen> {
           ),
           if (!n.onDevice) ...[
             DropdownButtonFormField<ChatApiFlavor>(
-              value: n.remote.flavor,
+              initialValue: n.remote.flavor,
               decoration: const InputDecoration(
                   labelText: 'Provider', border: OutlineInputBorder()),
               items: ChatApiFlavor.values

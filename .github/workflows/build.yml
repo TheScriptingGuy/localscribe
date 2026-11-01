@@ -30,7 +30,10 @@ jobs:
       - name: Materialize Android platform files
         # The android/ folder is not committed; flutter create regenerates it
         # from pubspec.yaml + lib/ without touching our Dart sources or assets.
-        run: flutter create --platforms=android --org ai.localscribe --project-name localscribe .
+        # It also drops a counter-app test/widget_test.dart, which we remove.
+        run: |
+          flutter create --platforms=android --org ai.localscribe --project-name localscribe .
+          rm -f test/widget_test.dart
 
       - name: Apply app manifest (permissions)
         run: cp ci/AndroidManifest.xml android/app/src/main/AndroidManifest.xml
