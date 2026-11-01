@@ -27,8 +27,8 @@ dependencies:
   just_audio: ^0.10.6
   file_picker: ^13.3.1
 
-  # BLE (Plaud device, Phase 5)
-  flutter_blue_plus: ^1.31.8
+  # BLE (Plaud device): package added in Phase 5. flutter_blue_plus 1.x
+  # pins compileSdk 33 (breaks current AndroidX) and 2.x changed license.
 
   # Crypto (BLE handshake + general)
   pointycastle: ^3.7.4
