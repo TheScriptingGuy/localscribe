@@ -33,3 +33,4 @@ Thumbs.db
 *.jks
 *.keystore
 key.properties
+server/diarization/models/
