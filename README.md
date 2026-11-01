@@ -6,9 +6,21 @@ All processing happens either **on-device** or against an **AI API URL you
 configure** (OpenAI / Anthropic / Whisper-compatible).
 
 This project is a clean-room **reimplementation from protocol knowledge**, not a
-copy of Plaud's code. The reverse-engineering notes in `../findings/` inform two
-things only: the default note **templates** (their section/outline schemas) and
-the optional **Plaud BLE device** integration (GATT layout + crypto construction).
+copy of Plaud's code. Interoperability research on the author's own device
+informs two things only: the default note **templates** (their section/outline
+schemas) and the optional **Plaud BLE device** integration (GATT layout + crypto
+construction).
+
+> **Disclaimer — study project, not affiliated with Plaud**
+>
+> LocalScribe is an independent, non-commercial **study/educational project**.
+> It is **not affiliated with, endorsed by, sponsored by, or connected to**
+> Plaud Inc. or any of its subsidiaries. "Plaud" and "Plaud Note" are
+> trademarks of their respective owners and are used here only to describe
+> compatibility (nominative use). This project contains no Plaud source code,
+> binaries, assets, or credentials, and it does not connect to Plaud servers.
+> Use it only with devices and accounts you own, and at your own risk; it is
+> provided "as is" without warranty of any kind (see `LICENSE`).
 
 ## What it does
 
