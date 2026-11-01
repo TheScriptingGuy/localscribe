@@ -350,7 +350,7 @@ class _RecordingDetailScreenState extends State<RecordingDetailScreen> {
         ),
         const SizedBox(height: 20),
         const Divider(height: 1),
-        _PlayerBar(player: _player),
+        _PlayerBar(player: _player, fallbackDuration: rec.duration),
         const Divider(height: 1),
         const SizedBox(height: 12),
         content,
@@ -584,65 +584,80 @@ class _AskBar extends StatelessWidget {
 
 class _PlayerBar extends StatelessWidget {
   final AudioPlayer player;
-  const _PlayerBar({required this.player});
+
+  /// Shown until the player has loaded the file and knows the real length.
+  final Duration fallbackDuration;
+  const _PlayerBar({required this.player, required this.fallbackDuration});
 
   @override
   Widget build(BuildContext context) {
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 16),
-      child: StreamBuilder<Duration>(
-        stream: player.positionStream,
-        builder: (_, snap) {
-          final pos = snap.data ?? Duration.zero;
-          final total = player.duration ?? Duration.zero;
-          final max = total.inMilliseconds.toDouble();
-          return Row(
-            children: [
-              StreamBuilder<PlayerState>(
-                stream: player.playerStateStream,
-                builder: (_, snap) {
-                  final playing = snap.data?.playing ?? false;
-                  final done =
-                      snap.data?.processingState == ProcessingState.completed;
-                  return IconButton(
-                    style: IconButton.styleFrom(
-                      backgroundColor: Palette.fill,
-                      fixedSize: const Size(56, 56),
-                    ),
-                    iconSize: 30,
-                    icon: Icon(playing && !done
-                        ? Icons.pause_rounded
-                        : Icons.play_arrow_rounded),
-                    onPressed: () async {
-                      if (done) await player.seek(Duration.zero);
-                      playing && !done ? player.pause() : player.play();
-                    },
-                  );
+      child: Row(
+        children: [
+          StreamBuilder<PlayerState>(
+            stream: player.playerStateStream,
+            builder: (_, snap) {
+              final playing = snap.data?.playing ?? false;
+              final done =
+                  snap.data?.processingState == ProcessingState.completed;
+              return IconButton(
+                style: IconButton.styleFrom(
+                  backgroundColor: Palette.fill,
+                  fixedSize: const Size(56, 56),
+                ),
+                iconSize: 30,
+                icon: Icon(playing && !done
+                    ? Icons.pause_rounded
+                    : Icons.play_arrow_rounded),
+                onPressed: () async {
+                  if (done) await player.seek(Duration.zero);
+                  playing && !done ? player.pause() : player.play();
                 },
-              ),
-              const SizedBox(width: 4),
-              Expanded(
-                child: Slider(
-                  value: max <= 0
-                      ? 0
-                      : pos.inMilliseconds.toDouble().clamp(0, max),
-                  max: max <= 0 ? 1 : max,
-                  onChanged: max <= 0
-                      ? null
-                      : (v) => player.seek(Duration(milliseconds: v.round())),
+              );
+            },
+          ),
+          const SizedBox(width: 4),
+          Expanded(
+            child: StreamBuilder<Duration?>(
+              stream: player.durationStream,
+              builder: (_, durationSnap) => StreamBuilder<Duration>(
+                stream: player.positionStream,
+                builder: (_, snap) => _progress(
+                  snap.data ?? Duration.zero,
+                  durationSnap.data ?? player.duration,
                 ),
               ),
-              Text(
-                '${formatDuration(pos)} / ${formatDuration(total)}',
-                style: const TextStyle(
-                  fontSize: 15,
-                  fontFeatures: [FontFeature.tabularFigures()],
-                ),
-              ),
-            ],
-          );
-        },
+            ),
+          ),
+        ],
       ),
+    );
+  }
+
+  /// Seek bar and "position / length"; [loaded] is null until the file loads.
+  Widget _progress(Duration pos, Duration? loaded) {
+    final total = loaded ?? fallbackDuration;
+    final max = total.inMilliseconds.toDouble();
+    return Row(
+      children: [
+        Expanded(
+          child: Slider(
+            value: max <= 0 ? 0 : pos.inMilliseconds.toDouble().clamp(0, max),
+            max: max <= 0 ? 1 : max,
+            onChanged: max <= 0 || loaded == null
+                ? null
+                : (v) => player.seek(Duration(milliseconds: v.round())),
+          ),
+        ),
+        Text(
+          '${formatDuration(pos)} / ${formatDuration(total)}',
+          style: const TextStyle(
+            fontSize: 15,
+            fontFeatures: [FontFeature.tabularFigures()],
+          ),
+        ),
+      ],
     );
   }
 }
