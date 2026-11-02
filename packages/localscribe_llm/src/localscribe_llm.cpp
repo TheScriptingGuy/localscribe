@@ -258,7 +258,8 @@ LS_API char *lsl_generate(const char *model_path, const char **roles, const char
 
     llama_sampler *smpl = llama_sampler_chain_init(llama_sampler_chain_default_params());
     // Small models loop without a repetition penalty.
-    llama_sampler_chain_add(smpl, llama_sampler_init_penalties(64, 1.1f, 0.0f, 0.0f));
+    llama_sampler_chain_add(smpl, llama_sampler_init_penalties(
+                                      llama_vocab_n_tokens(vocab), 64, 1.1f, 0.0f, 0.0f));
     if (temperature <= 0) {
         llama_sampler_chain_add(smpl, llama_sampler_init_greedy());
     } else {
