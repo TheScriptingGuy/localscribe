@@ -7,23 +7,24 @@ class RecordingAction {
   static const stop = 'stop';
 }
 
-enum _Mode { recording, transcribing }
+enum _Mode { recording, working }
 
 /// Android foreground service that keeps the app working while the screen is
 /// off or the app is in the background: type `microphone` while recording,
-/// `dataSync` (plus a wake lock) during on-device transcription.
+/// `dataSync` (plus a wake lock) during on-device transcription or notes.
 ///
 /// The audio itself is still captured by the `record` plugin in the app; the
 /// service only keeps the process foreground-eligible for the mic and shows
 /// the ongoing notification with Pause/Resume and Stop. Only one service can
-/// run, so recording takes precedence over transcription.
+/// run, so recording takes precedence over background work.
 class RecordingService {
   static const _serviceId = 701;
   static _Mode? _mode;
 
-  /// Latest transcription status, kept so the transcription notification can
-  /// come back if a recording interrupted it.
-  static String? _transcribing;
+  /// Background work keeping the service up, by owner (e.g. "transcription",
+  /// "notes"): its notification title and text. The most recent update is
+  /// shown. Kept so the notification can come back after a recording.
+  static final _work = <String, (String, String)>{};
 
   /// Call once at startup, before runApp.
   static void init() {
@@ -66,35 +67,48 @@ class RecordingService {
     _mode = _Mode.recording;
   }
 
-  /// Keeps an on-device transcription running with the screen off. No-op
-  /// while recording (that service already keeps the process alive).
-  static Future<void> startTranscribing(String text) async {
-    _transcribing = text;
+  /// Keeps on-device work (transcription, notes) running with the screen
+  /// off, until every owner has called [stopWork]. While recording, the
+  /// recording service already keeps the process alive.
+  static Future<void> startWork(String owner, String title, String text) async {
+    _work[owner] = (title, text);
     if (_mode == _Mode.recording) return;
-    if (_mode == _Mode.transcribing) return updateTranscribing(text);
-    await _ensureNotificationPermission();
-    await FlutterForegroundTask.startService(
-      serviceId: _serviceId,
-      serviceTypes: [ForegroundServiceTypes.dataSync],
-      notificationTitle: 'LocalScribe is transcribing',
-      notificationText: text,
-      callback: _startCallback,
-    );
-    _mode = _Mode.transcribing;
+    if (_mode == _Mode.working) return updateWork(owner, title, text);
+    _mode = _Mode.working; // before awaiting, so a second owner doesn't start it too
+    try {
+      await _ensureNotificationPermission();
+      await FlutterForegroundTask.startService(
+        serviceId: _serviceId,
+        serviceTypes: [ForegroundServiceTypes.dataSync],
+        notificationTitle: title,
+        notificationText: text,
+        callback: _startCallback,
+      );
+    } catch (_) {
+      _mode = null;
+      rethrow;
+    }
   }
 
-  static Future<void> updateTranscribing(String text) async {
-    _transcribing = text;
-    if (_mode != _Mode.transcribing) return;
+  static Future<void> updateWork(String owner, String title, String text) async {
+    if (!_work.containsKey(owner)) return;
+    _work[owner] = (title, text);
+    if (_mode != _Mode.working) return;
     await FlutterForegroundTask.updateService(
-      notificationTitle: 'LocalScribe is transcribing',
+      notificationTitle: title,
       notificationText: text,
     );
   }
 
-  static Future<void> stopTranscribing() async {
-    _transcribing = null;
-    if (_mode != _Mode.transcribing) return;
+  static Future<void> stopWork(String owner) async {
+    if (_work.remove(owner) == null) return;
+    if (_mode != _Mode.working) return;
+    if (_work.isNotEmpty) {
+      final (title, text) = _work.values.last;
+      await FlutterForegroundTask.updateService(
+          notificationTitle: title, notificationText: text);
+      return;
+    }
     _mode = null;
     await FlutterForegroundTask.stopService();
   }
@@ -121,8 +135,11 @@ class RecordingService {
     if (await FlutterForegroundTask.isRunningService) {
       await FlutterForegroundTask.stopService();
     }
-    final pending = _transcribing;
-    if (pending != null) await startTranscribing(pending);
+    if (_work.isNotEmpty) {
+      final owner = _work.keys.last;
+      final (title, text) = _work[owner]!;
+      await startWork(owner, title, text);
+    }
   }
 
   static List<NotificationButton> _buttons({required bool paused}) => [

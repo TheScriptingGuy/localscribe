@@ -31,6 +31,9 @@ dependencies:
   # On-device transcription: whisper.cpp + MediaCodec decoding via FFI
   localscribe_native:
     path: packages/localscribe_native
+  # On-device AI notes and Ask-AI (llama.cpp).
+  localscribe_llm:
+    path: packages/localscribe_llm
 
   # On-device speaker recognition (pyannote segmentation + speaker
   # embeddings). Pinned: local_diarizer.dart uses its FFI bindings directly.

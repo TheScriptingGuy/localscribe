@@ -4,6 +4,7 @@ import 'package:provider/provider.dart';
 import '../models/note_template.dart';
 import '../services/ai/ai_factory.dart';
 import '../services/ai/ai_types.dart';
+import '../services/models/llm_models.dart';
 import '../services/notes/note_generator.dart';
 import '../services/templates/prompt_builder.dart';
 import '../services/templates/template_repository.dart';
@@ -130,7 +131,8 @@ class _GenerateNoteScreenState extends State<GenerateNoteScreen> {
     });
 
     try {
-      final NoteGenerator gen = AiFactory.noteGenerator(settings.noteAi);
+      final NoteGenerator gen = AiFactory.noteGenerator(settings.noteAi,
+          models: context.read<LlmModelManager>());
       final messages = PromptBuilder.forNote(
         template: template,
         transcript: _transcript.text.trim(),

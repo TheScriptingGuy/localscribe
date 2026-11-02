@@ -3,8 +3,10 @@ import 'package:provider/provider.dart';
 
 import 'services/audio/recording_service.dart';
 import 'services/library/recording_store.dart';
+import 'services/models/llm_models.dart';
 import 'services/models/speaker_models.dart';
 import 'services/models/whisper_models.dart';
+import 'services/notes/note_jobs.dart';
 import 'services/templates/template_repository.dart';
 import 'services/transcription/transcription_jobs.dart';
 import 'settings/settings.dart';
@@ -32,17 +34,27 @@ Future<void> main() async {
   final speakerModels = SpeakerModelManager();
   await speakerModels.load();
 
+  final llmModels = LlmModelManager();
+  await llmModels.load();
+
   runApp(LocalScribeApp(
     settings: settings,
     templates: templates,
     recordings: recordings,
     models: models,
     speakerModels: speakerModels,
+    llmModels: llmModels,
     jobs: TranscriptionJobs(
       store: recordings,
       settings: settings,
       models: models,
       speakerModels: speakerModels,
+    ),
+    noteJobs: NoteJobs(
+      store: recordings,
+      settings: settings,
+      templates: templates,
+      llmModels: llmModels,
     ),
   ));
 }
@@ -53,7 +65,9 @@ class LocalScribeApp extends StatelessWidget {
   final RecordingStore recordings;
   final WhisperModelManager models;
   final SpeakerModelManager speakerModels;
+  final LlmModelManager llmModels;
   final TranscriptionJobs jobs;
+  final NoteJobs noteJobs;
 
   const LocalScribeApp({
     super.key,
@@ -62,7 +76,9 @@ class LocalScribeApp extends StatelessWidget {
     required this.recordings,
     required this.models,
     required this.speakerModels,
+    required this.llmModels,
     required this.jobs,
+    required this.noteJobs,
   });
 
   @override
@@ -74,7 +90,9 @@ class LocalScribeApp extends StatelessWidget {
         ChangeNotifierProvider.value(value: recordings),
         ChangeNotifierProvider.value(value: models),
         ChangeNotifierProvider.value(value: speakerModels),
+        ChangeNotifierProvider.value(value: llmModels),
         ChangeNotifierProvider.value(value: jobs),
+        ChangeNotifierProvider.value(value: noteJobs),
       ],
       child: MaterialApp(
         title: 'LocalScribe',

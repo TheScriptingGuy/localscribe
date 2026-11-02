@@ -169,7 +169,9 @@ class _RecordingRow extends StatelessWidget {
                     if (_speakerCount(r) > 0)
                       _Badge(
                         icon: Icons.people_outline,
-                        label: '${_speakerCount(r)} speakers',
+                        label: _speakerCount(r) == 1
+                            ? '1 speaker'
+                            : '${_speakerCount(r)} speakers',
                       ),
                     if (r.notes.isNotEmpty)
                       _Badge(

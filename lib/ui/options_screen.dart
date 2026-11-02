@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import '../models/ai_config.dart';
+import '../services/models/llm_models.dart';
 import '../services/models/model_manager.dart';
 import '../services/models/speaker_models.dart';
 import '../services/models/whisper_models.dart';
@@ -169,7 +170,7 @@ class _OptionsScreenState extends State<OptionsScreen> {
               n.onDevice = v;
               settings.save();
             },
-            onDeviceLabel: 'On-device (llama.cpp / GGUF) — Phase 4',
+            onDeviceLabel: 'On-device (llama.cpp)',
           ),
           if (!n.onDevice) ...[
             DropdownButtonFormField<ChatApiFlavor>(
@@ -203,7 +204,7 @@ class _OptionsScreenState extends State<OptionsScreen> {
                 'OpenAI-compatible also covers Ollama, LM Studio, llama.cpp '
                 'server, vLLM, OpenRouter, Groq — just change the base URL.'),
           ] else
-            const _Hint('Downloadable GGUF models arrive in Phase 4.'),
+            _llmModelTile(context, n),
           const SizedBox(height: 24),
           FilledButton.icon(
             onPressed: () async {
@@ -238,7 +239,27 @@ class _OptionsScreenState extends State<OptionsScreen> {
             : 'Download a model and tap it to use it offline'),
         trailing: const Icon(Icons.chevron_right),
         onTap: () => Navigator.push(context,
-            MaterialPageRoute(builder: (_) => const ModelsScreen())),
+            MaterialPageRoute(builder: ModelsScreen.whisper)),
+      ),
+    );
+  }
+
+  Widget _llmModelTile(BuildContext context, NoteAiConfig n) {
+    final models = context.watch<LlmModelManager>();
+    final selected = models.byFile(n.localModel);
+    final model =
+        selected != null && models.isInstalled(selected) ? selected : null;
+    return Card(
+      margin: const EdgeInsets.only(top: 12),
+      child: ListTile(
+        leading: Icon(model != null ? Icons.memory : Icons.download_outlined),
+        title: Text(model != null ? 'Model: ${model.label}' : 'No model selected'),
+        subtitle: Text(model != null
+            ? '${model.sizeLabel} · transcripts stay on this phone'
+            : 'Download a model and tap it to write notes offline'),
+        trailing: const Icon(Icons.chevron_right),
+        onTap: () => Navigator.push(
+            context, MaterialPageRoute(builder: ModelsScreen.llm)),
       ),
     );
   }

@@ -2,22 +2,21 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:just_audio/just_audio.dart';
 import 'package:provider/provider.dart';
-import 'package:uuid/uuid.dart';
 
 import '../models/recording.dart';
 import '../services/ai/ai_factory.dart';
 import '../services/ai/ai_types.dart';
 import '../services/library/recording_store.dart';
-import '../services/notes/auto_template.dart';
+import '../services/models/llm_models.dart';
+import '../services/notes/note_jobs.dart';
 import '../services/templates/prompt_builder.dart';
 import '../services/templates/template_repository.dart';
 import '../services/transcription/transcription_jobs.dart';
+import '../services/transcription/transcriber.dart' show CancelSignal;
 import '../settings/settings.dart';
 import 'format.dart';
 import 'markdown_view.dart';
 import 'theme.dart';
-
-const _autoChoice = '__auto__';
 
 /// One recording: playback, transcript, generated notes and Ask-AI chat.
 class RecordingDetailScreen extends StatefulWidget {
@@ -30,7 +29,6 @@ class RecordingDetailScreen extends StatefulWidget {
 
 class _RecordingDetailScreenState extends State<RecordingDetailScreen> {
   final _player = AudioPlayer();
-  bool _generating = false;
   String? _error;
 
   /// Which generated note the Notes tab shows (index into rec.notes).
@@ -59,61 +57,12 @@ class _RecordingDetailScreenState extends State<RecordingDetailScreen> {
     return context.read<TranscriptionJobs>().start(rec);
   }
 
-  Future<void> _generate(Recording rec, String choice) async {
-    final settings = context.read<Settings>();
-    final store = context.read<RecordingStore>();
-    final templates = context.read<TemplateRepository>();
-    final transcript = rec.transcriptForAi;
-    if (transcript.isEmpty) {
-      setState(() => _error = 'Transcribe the recording first.');
-      return;
-    }
+  void _generate(Recording rec, String choice) {
     setState(() {
-      _generating = true;
       _error = null;
+      _noteIndex = 0; // the new note goes first
     });
-    try {
-      final gen = AiFactory.noteGenerator(settings.noteAi);
-      final auto = choice == _autoChoice;
-      final template = auto
-          ? await AutoTemplatePicker.pick(
-              generator: gen, templates: templates.all, transcript: transcript)
-          : templates.byId(choice);
-      if (template == null) throw AiException('Template not found: $choice');
-
-      final content = await gen.complete(PromptBuilder.forNote(
-        template: template,
-        transcript: transcript,
-        languageHint: settings.noteLanguage,
-      ));
-      rec.notes.insert(
-        0,
-        GeneratedNote(
-          id: const Uuid().v4(),
-          templateId: template.id,
-          templateName: template.name,
-          content: content.trim(),
-          createdAt: DateTime.now(),
-          auto: auto,
-        ),
-      );
-      // Adopt the note's title for recordings that still have a default name.
-      if (rec.title.startsWith('Recording ')) {
-        final heading = RegExp(r'^#\s+(.+)$', multiLine: true)
-            .firstMatch(content)
-            ?.group(1)
-            ?.trim();
-        if (heading != null && heading.isNotEmpty) rec.title = heading;
-      }
-      _noteIndex = 0;
-      await store.save(rec);
-    } on AiException catch (e) {
-      _error = e.message;
-    } catch (e) {
-      _error = e.toString();
-    } finally {
-      if (mounted) setState(() => _generating = false);
-    }
+    context.read<NoteJobs>().generate(rec, choice);
   }
 
   void _copy(String text, String what) {
@@ -257,7 +206,7 @@ class _RecordingDetailScreenState extends State<RecordingDetailScreen> {
               leading: const Icon(Icons.auto_awesome),
               title: const Text('Auto'),
               subtitle: const Text('Let the AI pick the best template'),
-              onTap: () => Navigator.pop(ctx, _autoChoice),
+              onTap: () => Navigator.pop(ctx, NoteJobs.autoTemplate),
             ),
             const Divider(),
             ...templates.all.map((t) => ListTile(
@@ -271,7 +220,7 @@ class _RecordingDetailScreenState extends State<RecordingDetailScreen> {
         ),
       ),
     );
-    if (choice != null) await _generate(rec, choice);
+    if (choice != null && mounted) _generate(rec, choice);
   }
 
   // --- UI ------------------------------------------------------------------
@@ -280,11 +229,12 @@ class _RecordingDetailScreenState extends State<RecordingDetailScreen> {
   Widget build(BuildContext context) {
     final store = context.watch<RecordingStore>();
     final jobs = context.watch<TranscriptionJobs>();
+    final notes = context.watch<NoteJobs>();
     final rec = store.byId(widget.recordingId);
     if (rec == null) {
       return const Scaffold(body: Center(child: Text('Recording not found')));
     }
-    final error = _error ?? jobs.errorOf(rec.id);
+    final error = _error ?? jobs.errorOf(rec.id) ?? notes.errorOf(rec.id);
     final transcript = rec.transcript;
 
     return DefaultTabController(
@@ -344,6 +294,7 @@ class _RecordingDetailScreenState extends State<RecordingDetailScreen> {
                   TextButton(
                       onPressed: () {
                         jobs.clearError(rec.id);
+                        notes.clearError(rec.id);
                         setState(() => _error = null);
                       },
                       child: const Text('Dismiss')),
@@ -352,7 +303,7 @@ class _RecordingDetailScreenState extends State<RecordingDetailScreen> {
             Expanded(
               child: TabBarView(children: [
                 _transcriptTab(rec, jobs),
-                _notesTab(rec),
+                _notesTab(rec, notes),
               ]),
             ),
             if (transcript != null) _AskBar(onTap: () => _openChat(rec)),
@@ -466,29 +417,36 @@ class _RecordingDetailScreenState extends State<RecordingDetailScreen> {
     return out;
   }
 
-  Widget _notesTab(Recording rec) {
+  Widget _notesTab(Recording rec, NoteJobs notes) {
     if (rec.transcript == null) {
       return const _CallToAction(
         text: 'Transcribe the recording first, then generate notes from any '
             'template.',
       );
     }
+    final generating = notes.isRunning(rec.id);
+    final progress = generating
+        ? Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 24),
+            child: _TranscribeProgress(
+              label: 'Writing note',
+              progress: notes.progressOf(rec.id),
+              onCancel: () => notes.cancel(rec.id),
+            ),
+          )
+        : null;
     if (rec.notes.isEmpty) {
-      return _CallToAction(
-        text: 'Turn the transcript into a summary, meeting minutes or any '
-            'other template.',
-        button: FilledButton.icon(
-          onPressed: _generating ? null : () => _pickTemplate(rec),
-          icon: _generating
-              ? const SizedBox(
-                  width: 16,
-                  height: 16,
-                  child: CircularProgressIndicator(
-                      strokeWidth: 2, color: Colors.white))
-              : const Icon(Icons.auto_awesome, size: 20),
-          label: Text(_generating ? 'Generating…' : 'Generate note'),
-        ),
-      );
+      return progress != null
+          ? ListView(children: [progress])
+          : _CallToAction(
+              text: 'Turn the transcript into a summary, meeting minutes or '
+                  'any other template.',
+              button: FilledButton.icon(
+                onPressed: () => _pickTemplate(rec),
+                icon: const Icon(Icons.auto_awesome, size: 20),
+                label: const Text('Generate note'),
+              ),
+            );
     }
 
     final index = _noteIndex < rec.notes.length ? _noteIndex : 0;
@@ -514,11 +472,11 @@ class _RecordingDetailScreenState extends State<RecordingDetailScreen> {
                   borderRadius: BorderRadius.circular(8),
                   child: InkWell(
                     borderRadius: BorderRadius.circular(8),
-                    onTap: _generating ? null : () => _pickTemplate(rec),
+                    onTap: generating ? null : () => _pickTemplate(rec),
                     child: SizedBox(
                       width: 48,
                       height: 32,
-                      child: _generating
+                      child: generating
                           ? const Center(
                               child: SizedBox(
                                   width: 16,
@@ -533,6 +491,7 @@ class _RecordingDetailScreenState extends State<RecordingDetailScreen> {
             ],
           ),
         ),
+        if (progress != null) progress,
         Expanded(
           child: ListView(
             padding: const EdgeInsets.fromLTRB(24, 16, 24, 32),
@@ -789,8 +748,13 @@ class _ChatScreenState extends State<_ChatScreen> {
   String? _pending;
   String? _error;
 
+  /// The on-device model reading the transcript before it answers, 0–1.
+  double? _reading;
+  CancelSignal? _cancel;
+
   @override
   void dispose() {
+    _cancel?.cancel();
     _input.dispose();
     super.dispose();
   }
@@ -808,28 +772,36 @@ class _ChatScreenState extends State<_ChatScreen> {
     setState(() {
       rec.chat.add(ChatMessage(ChatRole.user, question));
       _pending = '';
+      _reading = null;
       _error = null;
+      _cancel = CancelSignal();
     });
 
     final answer = StringBuffer();
     try {
-      final gen = AiFactory.noteGenerator(settings.noteAi);
+      final gen = AiFactory.noteGenerator(settings.noteAi,
+          models: context.read<LlmModelManager>());
       final messages = PromptBuilder.forChat(
         transcript: rec.transcriptForAi,
         history: history,
         question: question,
       );
-      await for (final chunk in gen.stream(messages)) {
+      await for (final chunk in gen.stream(messages,
+          cancel: _cancel,
+          onProgress: (p) {
+            if (mounted && answer.isEmpty) setState(() => _reading = p);
+          })) {
         answer.write(chunk);
         if (mounted) setState(() => _pending = answer.toString());
       }
       rec.chat.add(ChatMessage(ChatRole.assistant, answer.toString().trim()));
     } on AiException catch (e) {
-      _error = e.message;
+      if (!e.cancelled) _error = e.message;
     } catch (e) {
       _error = e.toString();
     } finally {
       await store.save(rec);
+      _cancel = null;
       if (mounted) setState(() => _pending = null);
     }
   }
@@ -844,7 +816,13 @@ class _ChatScreenState extends State<_ChatScreen> {
       ...rec.chat.map(
           (m) => _Bubble(text: m.content, mine: m.role == ChatRole.user)),
       if (_pending != null)
-        _Bubble(text: _pending!.isEmpty ? '…' : _pending!, mine: false),
+        _Bubble(
+            text: _pending!.isNotEmpty
+                ? _pending!
+                : _reading != null && _reading! < 0.9
+                    ? 'Reading the transcript… ${(_reading! / 0.9 * 100).floor()}%'
+                    : '…',
+            mine: false),
     ];
     return Scaffold(
       appBar: AppBar(title: const Text('Ask AI')),

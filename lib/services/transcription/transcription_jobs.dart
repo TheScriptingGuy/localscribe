@@ -45,6 +45,8 @@ class TranscriptionJobs extends ChangeNotifier {
     required this.speakerModels,
   });
 
+  static const _owner = 'transcription';
+
   final _jobs = <String, _Job>{};
   final _errors = <String, String>{};
 
@@ -87,7 +89,7 @@ class TranscriptionJobs extends ChangeNotifier {
       final percent = (p * 100).floor();
       if (onDevice && percent != lastPercent) {
         lastPercent = percent;
-        RecordingService.updateTranscribing(
+        RecordingService.updateWork(_owner, 'LocalScribe is transcribing',
                 '${rec.title} · ${job.phase.label} $percent%')
             .catchError((_) {});
       }
@@ -97,7 +99,9 @@ class TranscriptionJobs extends ChangeNotifier {
     try {
       if (onDevice) {
         // Best effort: without the service it still runs while the app is open.
-        await RecordingService.startTranscribing(rec.title).catchError((_) {});
+        await RecordingService.startWork(
+                _owner, 'LocalScribe is transcribing', rec.title)
+            .catchError((_) {});
       }
 
       Future<List<SpeakerTurn>> diarize() {
@@ -168,7 +172,7 @@ class TranscriptionJobs extends ChangeNotifier {
     } finally {
       _jobs.remove(rec.id);
       if (_jobs.isEmpty) {
-        await RecordingService.stopTranscribing().catchError((_) {});
+        await RecordingService.stopWork(_owner).catchError((_) {});
       }
       notifyListeners();
     }

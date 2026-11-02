@@ -43,7 +43,9 @@ class AnthropicChatGenerator implements NoteGenerator {
   }
 
   @override
-  Future<String> complete(List<ChatMessage> messages) async {
+  Future<String> complete(List<ChatMessage> messages,
+      {void Function(double progress)? onProgress,
+      CancelSignal? cancel}) async {
     final (system, turns) = _split(messages);
     try {
       final resp = await _dio.post(
@@ -54,6 +56,7 @@ class AnthropicChatGenerator implements NoteGenerator {
           if (system != null) 'system': system,
           'messages': turns,
         },
+        cancelToken: _cancelToken(cancel),
         options: Options(headers: _headers, responseType: ResponseType.json),
       );
       final map = Map<String, dynamic>.from(resp.data as Map);
@@ -74,7 +77,9 @@ class AnthropicChatGenerator implements NoteGenerator {
   }
 
   @override
-  Stream<String> stream(List<ChatMessage> messages) async* {
+  Stream<String> stream(List<ChatMessage> messages,
+      {void Function(double progress)? onProgress,
+      CancelSignal? cancel}) async* {
     final (system, turns) = _split(messages);
     final resp = await _dio.post<ResponseBody>(
       _endpoint,
@@ -85,6 +90,7 @@ class AnthropicChatGenerator implements NoteGenerator {
         if (system != null) 'system': system,
         'messages': turns,
       },
+      cancelToken: _cancelToken(cancel),
       options: Options(headers: _headers, responseType: ResponseType.stream),
     );
     final lines = resp.data!.stream
@@ -107,5 +113,12 @@ class AnthropicChatGenerator implements NoteGenerator {
         // Ignore non-JSON event lines.
       }
     }
+  }
+
+  static CancelToken? _cancelToken(CancelSignal? cancel) {
+    if (cancel == null) return null;
+    final token = CancelToken();
+    cancel.onCancel(token.cancel);
+    return token;
   }
 }

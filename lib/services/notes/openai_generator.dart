@@ -34,7 +34,9 @@ class OpenAiChatGenerator implements NoteGenerator {
       .toList(growable: false);
 
   @override
-  Future<String> complete(List<ChatMessage> messages) async {
+  Future<String> complete(List<ChatMessage> messages,
+      {void Function(double progress)? onProgress,
+      CancelSignal? cancel}) async {
     try {
       final resp = await _dio.post(
         _endpoint,
@@ -43,6 +45,7 @@ class OpenAiChatGenerator implements NoteGenerator {
           'messages': _messages(messages),
           'stream': false,
         },
+        cancelToken: _cancelToken(cancel),
         options: Options(headers: _headers, responseType: ResponseType.json),
       );
       final map = Map<String, dynamic>.from(resp.data as Map);
@@ -59,7 +62,9 @@ class OpenAiChatGenerator implements NoteGenerator {
   }
 
   @override
-  Stream<String> stream(List<ChatMessage> messages) async* {
+  Stream<String> stream(List<ChatMessage> messages,
+      {void Function(double progress)? onProgress,
+      CancelSignal? cancel}) async* {
     final resp = await _dio.post<ResponseBody>(
       _endpoint,
       data: {
@@ -67,6 +72,7 @@ class OpenAiChatGenerator implements NoteGenerator {
         'messages': _messages(messages),
         'stream': true,
       },
+      cancelToken: _cancelToken(cancel),
       options: Options(
         headers: _headers,
         responseType: ResponseType.stream,
@@ -91,5 +97,12 @@ class OpenAiChatGenerator implements NoteGenerator {
         // Ignore keep-alive / malformed partial lines.
       }
     }
+  }
+
+  static CancelToken? _cancelToken(CancelSignal? cancel) {
+    if (cancel == null) return null;
+    final token = CancelToken();
+    cancel.onCancel(token.cancel);
+    return token;
   }
 }

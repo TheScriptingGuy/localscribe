@@ -2,9 +2,11 @@ import '../../models/ai_config.dart';
 import '../diarization/diarizer.dart';
 import '../diarization/local_diarizer.dart';
 import '../diarization/remote_diarizer.dart';
+import '../models/llm_models.dart';
 import '../models/speaker_models.dart';
 import '../models/whisper_models.dart';
 import '../notes/anthropic_generator.dart';
+import '../notes/local_llm_generator.dart';
 import '../notes/note_generator.dart';
 import '../notes/openai_generator.dart';
 import '../transcription/local_whisper.dart';
@@ -12,8 +14,7 @@ import '../transcription/remote_whisper.dart';
 import '../transcription/transcriber.dart';
 import 'ai_types.dart';
 
-/// Builds live AI backends from configuration. On-device notes arrive in
-/// Phase 4; until then selecting it throws a clear message.
+/// Builds live AI backends from configuration.
 class AiFactory {
   static Transcriber transcriber(TranscriptionConfig c,
       {required WhisperModelManager models}) {
@@ -49,11 +50,15 @@ class AiFactory {
     return RemoteDiarizer(c.remote);
   }
 
-  static NoteGenerator noteGenerator(NoteAiConfig c) {
+  static NoteGenerator noteGenerator(NoteAiConfig c,
+      {required LlmModelManager models}) {
     if (c.onDevice) {
-      throw AiException(
-          'On-device notes (llama.cpp) are not available yet — configure a '
-          'chat API URL in Options, or wait for Phase 4.');
+      final model = models.byFile(c.localModel);
+      if (model == null || !models.isInstalled(model)) {
+        throw AiException('No on-device AI model downloaded yet. Open '
+            'Options > Note AI to download one.');
+      }
+      return LocalLlmGenerator(model, models.fileOf(model));
     }
     if (c.remote.baseUrl.trim().isEmpty) {
       throw AiException('No note AI API URL configured.');
