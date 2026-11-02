@@ -78,10 +78,15 @@ class PlaudDeviceSession extends ChangeNotifier {
   Future<String> _scan() async {
     _set(PlaudStatus.scanning, 'Scanning for ${PlaudProtocol.deviceName}…');
     final completer = Completer<String>();
+    // No service filter: the recorder does not advertise its GATT service UUID
+    // (0x1910) — that only appears in the GATT table after connecting. We match
+    // purely by advertised device name instead. Log every named advert seen so
+    // a miss is diagnosable on-screen.
     _scanSub = _ble.scanForDevices(
-      withServices: [Uuid.parse(PlaudProtocol.svc)],
+      withServices: const [],
       scanMode: ScanMode.lowLatency,
     ).listen((d) {
+      if (d.name.isNotEmpty) _log('advert ${d.name} rssi=${d.rssi}');
       if (!completer.isCompleted &&
           (d.name == PlaudProtocol.deviceName || d.name.startsWith('PLAUD'))) {
         _log('found ${d.name} ${d.id} rssi=${d.rssi}');
