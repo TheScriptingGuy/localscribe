@@ -40,10 +40,15 @@ jobs:
       - name: Apply app manifest (permissions)
         run: cp ci/AndroidManifest.xml android/app/src/main/AndroidManifest.xml
 
-      - name: Raise minSdk for BLE / audio
+      - name: Raise minSdk / compileSdk for BLE / audio
+        # minSdk 24 for the native libs; compileSdk 37 because reactive_ble_mobile
+        # requires it. Install the API 37 platform so AGP can compile against it.
         run: |
           sed -i 's/minSdkVersion flutter.minSdkVersion/minSdkVersion 24/' android/app/build.gradle || true
           sed -i 's/minSdk = flutter.minSdkVersion/minSdk = 24/' android/app/build.gradle.kts || true
+          sed -i 's/compileSdkVersion flutter.compileSdkVersion/compileSdkVersion 37/' android/app/build.gradle || true
+          sed -i 's/compileSdk = flutter.compileSdkVersion/compileSdk = 37/' android/app/build.gradle.kts || true
+          yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "platforms;android-37" >/dev/null 2>&1 || true
 
       - name: Release signing
         # A fixed key so each build can update the previous install. Skipped

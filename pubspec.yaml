@@ -42,9 +42,7 @@ dependencies:
 
   # BLE (Plaud device, Phase 5). flutter_reactive_ble is Apache-2.0 (FOSS),
   # unlike flutter_blue_plus 1.x (compileSdk 33) / 2.x (non-free license).
-  # Pinned 5.2.0: 5.3.1's reactive_ble_mobile requires compileSdk 37 (an
-  # unreleased platform); 5.2.0 builds against the stable SDK.
-  flutter_reactive_ble: 5.2.0
+  flutter_reactive_ble: ^5.3.1
   permission_handler: ^11.3.1
   # RSA PEM parsing for the imported Plaud key (thin wrapper over pointycastle).
   basic_utils: ^5.7.0
@@ -62,13 +60,6 @@ dependencies:
 
 dev_dependencies:
   flutter_lints: ^6.0.0
-
-# flutter_reactive_ble's platform packages float to their newest 5.x, and
-# reactive_ble_mobile 5.3.1 requires the unreleased compileSdk 37. Pin them to
-# 5.2.0 (lockstep with the meta-package) so the build uses the stable SDK.
-dependency_overrides:
-  reactive_ble_mobile: 5.2.0
-  reactive_ble_platform_interface: 5.2.0
 
 flutter:
   uses-material-design: true
