@@ -63,6 +63,13 @@ dependencies:
 dev_dependencies:
   flutter_lints: ^6.0.0
 
+# flutter_reactive_ble's platform packages float to their newest 5.x, and
+# reactive_ble_mobile 5.3.1 requires the unreleased compileSdk 37. Pin them to
+# 5.2.0 (lockstep with the meta-package) so the build uses the stable SDK.
+dependency_overrides:
+  reactive_ble_mobile: 5.2.0
+  reactive_ble_platform_interface: 5.2.0
+
 flutter:
   uses-material-design: true
   assets:
