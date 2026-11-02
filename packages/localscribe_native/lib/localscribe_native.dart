@@ -15,9 +15,9 @@ import 'package:ffi/ffi.dart';
 const _libName = 'liblocalscribe_native.so';
 
 typedef _TranscribeC = Pointer<Utf8> Function(Pointer<Utf8>, Pointer<Utf8>,
-    Pointer<Utf8>, Pointer<Utf8>, Int32, Pointer<Void>);
+    Pointer<Utf8>, Pointer<Utf8>, Int32, Pointer<Float>, Int32, Pointer<Void>);
 typedef _TranscribeDart = Pointer<Utf8> Function(Pointer<Utf8>, Pointer<Utf8>,
-    Pointer<Utf8>, Pointer<Utf8>, int, Pointer<Void>);
+    Pointer<Utf8>, Pointer<Utf8>, int, Pointer<Float>, int, Pointer<Void>);
 typedef _DecodeFn = Pointer<Utf8> Function(
     Pointer<Utf8>, Pointer<Utf8>, Pointer<Void>);
 
@@ -68,7 +68,8 @@ class WhisperException implements Exception {
 }
 
 /// A running transcription. [result] completes with the decoded JSON map
-/// (`language`, `segments: [{start, end, text}]`) or a [WhisperException].
+/// (`language`, `segments: [{start, end, text, words}]`; with ranges
+/// `pieces: [{language, segments}]`) or a [WhisperException].
 class WhisperJob {
   WhisperJob._(this.result, this._cancel);
   final Future<Map<String, dynamic>> result;
@@ -159,12 +160,16 @@ class LocalScribeNative {
 
   /// Transcribes [audioPath] with the GGML model at [modelPath]. [scratchPath]
   /// receives the decoded PCM temporarily. [onProgress] gets 0.0–1.0.
+  ///
+  /// With [ranges] (start s, end s, speaker index) only those stretches are
+  /// transcribed, each detecting its own language; see `pieces` in the result.
   static WhisperJob transcribe({
     required String modelPath,
     required String audioPath,
     required String scratchPath,
     String language = 'auto',
     int threads = 4,
+    List<(double, double, int)>? ranges,
     void Function(double progress)? onProgress,
   }) {
     final b = _bindings;
@@ -178,8 +183,8 @@ class LocalScribeNative {
             if (!done) onProgress(b.jobProgress(job) / 1000);
           });
 
-    final future = _runInIsolate(
-            modelPath, audioPath, scratchPath, language, threads, jobAddress)
+    final future = _runInIsolate(modelPath, audioPath, scratchPath, language,
+            threads, ranges ?? const [], jobAddress)
         .then((json) {
       final map = Map<String, dynamic>.from(jsonDecode(json) as Map);
       if (map['error'] != null) throw WhisperException(map['error'].toString());
@@ -199,19 +204,29 @@ class LocalScribeNative {
 // Kept separate so the isolate closure captures only these sendable values,
 // not the timer/bindings in transcribe()'s scope.
 Future<String> _runInIsolate(String model, String audio, String scratch,
-        String language, int threads, int jobAddress) =>
-    Isolate.run(() =>
-        _transcribeSync(model, audio, scratch, language, threads, jobAddress));
+        String language, int threads, List<(double, double, int)> ranges,
+        int jobAddress) =>
+    Isolate.run(() => _transcribeSync(
+        model, audio, scratch, language, threads, ranges, jobAddress));
 
 String _transcribeSync(String model, String audio, String scratch,
-    String language, int threads, int jobAddress) {
+    String language, int threads, List<(double, double, int)> ranges,
+    int jobAddress) {
   final b = _Bindings(DynamicLibrary.open(_libName));
   final m = model.toNativeUtf8();
   final a = audio.toNativeUtf8();
   final s = scratch.toNativeUtf8();
   final l = language.toNativeUtf8();
+  final rs = malloc<Float>(ranges.isEmpty ? 1 : ranges.length * 3);
+  for (var i = 0; i < ranges.length; i++) {
+    final (start, end, speaker) = ranges[i];
+    rs[3 * i] = start;
+    rs[3 * i + 1] = end;
+    rs[3 * i + 2] = speaker.toDouble();
+  }
   try {
-    final r = b.transcribe(m, a, s, l, threads, Pointer.fromAddress(jobAddress));
+    final r = b.transcribe(m, a, s, l, threads, rs, ranges.length,
+        Pointer.fromAddress(jobAddress));
     // Segment boundaries can split a multi-byte character; don't throw on it.
     final bytes = Uint8List.fromList(r.cast<Uint8>().asTypedList(r.length));
     b.freeString(r);
@@ -221,5 +236,6 @@ String _transcribeSync(String model, String audio, String scratch,
     malloc.free(a);
     malloc.free(s);
     malloc.free(l);
+    malloc.free(rs);
   }
 }

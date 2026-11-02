@@ -20,6 +20,7 @@
 #include <cstring>
 #include <limits>
 #include <mutex>
+#include <numeric>
 #include <string>
 #include <vector>
 
@@ -38,6 +39,7 @@ constexpr int64_t kChunk = kRate * 60 * 10;  // transcribe 10 minutes at a time
 constexpr int64_t kSplitSearch = kRate * 10; // look back up to 10 s for a pause
 constexpr int kFrame = kRate / 5;            // 200 ms energy window
 constexpr int kHop = kRate / 20;             // 50 ms hop
+constexpr int64_t kShortTurn = kRate * 3;    // too short to detect a language
 
 // Progress is reported in permille: decoding 0-100, transcription 100-1000.
 constexpr int kDecodeShare = 100;
@@ -369,6 +371,80 @@ void append_words(std::string &out, whisper_context *ctx, int seg, double offset
     out += ']';
 }
 
+// A stretch of the decoded audio to transcribe, in samples.
+struct Span {
+    int64_t from, to;
+    int speaker;       // -1 when unknown
+    std::string lang;  // in: ISO code or "auto"; out: the language used
+    std::string json;  // out: comma-separated segment objects
+};
+
+// Transcribes samples [s.from, s.to) of the PCM file in chunks of up to
+// kChunk, cut at quiet points. With lang "auto" the first chunk's detected
+// language is kept for the rest. Progress covers `work` samples in total, of
+// which `done` were finished before this span.
+bool transcribe_span(whisper_context *ctx, FILE *f, Span &s, int n_threads, Job *job,
+                     int64_t done, int64_t work) {
+    std::vector<int16_t> raw;
+    std::vector<float> buf;
+    int64_t pos = s.from;
+    while (pos < s.to) {
+        const size_t n = (size_t)std::min(kChunk, s.to - pos);
+        raw.resize(n);
+        buf.resize(n);
+        if (fseeko(f, (off_t)pos * (off_t)sizeof(int16_t), SEEK_SET) != 0 ||
+            fread(raw.data(), sizeof(int16_t), n, f) != n) {
+            return false;
+        }
+        for (size_t i = 0; i < n; ++i) buf[i] = raw[i] / 32768.0f;
+        const size_t use = (pos + (int64_t)n < s.to) ? quiet_split(buf, n) : n;
+        // whisper skips input under 1 s; pad short replies with silence.
+        const size_t feed = std::max(use, (size_t)(kRate * 11 / 10));
+        buf.resize(use);
+        buf.resize(feed, 0.0f);
+
+        whisper_full_params wp = whisper_full_default_params(WHISPER_SAMPLING_GREEDY);
+        wp.n_threads = n_threads > 0 ? n_threads : 4;
+        wp.language = s.lang.c_str();
+        wp.translate = false;
+        wp.print_progress = false;
+        wp.print_realtime = false;
+        wp.print_timestamps = false;
+        wp.print_special = false;
+        wp.token_timestamps = true;
+
+        ProgressCtx pc{job, kDecodeShare + (int)((1000 - kDecodeShare) * (done + pos - s.from) / work),
+                       (int)((1000 - kDecodeShare) * (int64_t)use / work)};
+        wp.progress_callback = on_progress;
+        wp.progress_callback_user_data = &pc;
+        wp.abort_callback = on_abort;
+        wp.abort_callback_user_data = job;
+
+        if (whisper_full(ctx, wp, buf.data(), (int)feed) != 0) return false;
+        if (s.lang == "auto") {
+            const char *detected = whisper_lang_str(whisper_full_lang_id(ctx));
+            if (detected) s.lang = detected;
+        }
+
+        const double offset = (double)pos / kRate;
+        const double limit = (double)s.to / kRate;
+        const int segments = whisper_full_n_segments(ctx);
+        for (int i = 0; i < segments; ++i) {
+            char times[64];
+            snprintf(times, sizeof times, "{\"start\":%.2f,\"end\":%.2f,\"text\":",
+                     offset + whisper_full_get_segment_t0(ctx, i) / 100.0,
+                     std::min(limit, offset + whisper_full_get_segment_t1(ctx, i) / 100.0));
+            if (!s.json.empty()) s.json += ',';
+            s.json += times;
+            json_str(s.json, whisper_full_get_segment_text(ctx, i));
+            append_words(s.json, ctx, i, offset);
+            s.json += '}';
+        }
+        pos += (int64_t)use;
+    }
+    return true;
+}
+
 void on_log(ggml_log_level level, const char *text, void *) {
     if (level == GGML_LOG_LEVEL_ERROR) {
         LOGE("%s", text);
@@ -415,8 +491,15 @@ LS_API char *ls_decode(const char *audio_path, const char *pcm_path, void *job_p
 //   {"language":"en","segments":[{"start":0.0,"end":2.5,"text":"…",
 //                                 "words":[[0.0,0.4,"Hello"],…]}]}
 // or {"error":"…"} ("cancelled" after ls_job_cancel).
+//
+// With `n_ranges` > 0, only the given stretches are transcribed, each on its
+// own so each detects its own language (speaker turns of a mixed-language
+// conversation). `ranges` holds n_ranges triples [start s, end s, speaker].
+// Turns under 3 s reuse the language their speaker used in longer turns.
+// Returns {"pieces":[{"language":"en","segments":[…]},…]}, one per range.
 LS_API char *ls_transcribe(const char *model_path, const char *audio_path, const char *pcm_path,
-                           const char *language, int n_threads, void *job_ptr) {
+                           const char *language, int n_threads, const float *ranges,
+                           int n_ranges, void *job_ptr) {
     std::call_once(g_log_once, [] { whisper_log_set(on_log, nullptr); });
 
     Job local;
@@ -428,7 +511,8 @@ LS_API char *ls_transcribe(const char *model_path, const char *audio_path, const
         unlink(pcm_path);
         return json_error(err);
     }
-    if (total < kRate / 2) {
+    const bool pieces = ranges && n_ranges > 0;
+    if (!pieces && total < kRate / 2) {
         unlink(pcm_path);
         return strdup("{\"language\":null,\"segments\":[]}");
     }
@@ -442,69 +526,48 @@ LS_API char *ls_transcribe(const char *model_path, const char *audio_path, const
         return json_error("Could not load the whisper model. Try downloading it again.");
     }
 
+    const std::string lang = (language && *language) ? language : "auto";
+    std::vector<Span> spans;
+    if (pieces) {
+        for (int i = 0; i < n_ranges; ++i) {
+            const int64_t a = std::max<int64_t>(0, std::llround(ranges[3 * i] * kRate));
+            const int64_t b = std::min<int64_t>(total, std::llround(ranges[3 * i + 1] * kRate));
+            spans.push_back({std::min(a, total), std::max(a, b), (int)ranges[3 * i + 2], lang, ""});
+        }
+    } else {
+        spans.push_back({0, total, -1, lang, ""});
+    }
+    int64_t work = 0;
+    for (const Span &s : spans) work += s.to - s.from;
+    work = std::max<int64_t>(work, 1);
+
+    // Long turns first, so a short reply can reuse its speaker's language.
+    std::vector<size_t> order(spans.size());
+    std::iota(order.begin(), order.end(), 0);
+    std::stable_sort(order.begin(), order.end(), [&](size_t a, size_t b) {
+        return (spans[a].to - spans[a].from >= kShortTurn) >
+               (spans[b].to - spans[b].from >= kShortTurn);
+    });
+    std::vector<std::string> speaker_lang;
+
     FILE *f = fopen(pcm_path, "rb");
-    std::string lang = (language && *language) ? language : "auto";
-    std::string out = "{\"segments\":[";
-    bool first = true;
-    std::vector<int16_t> raw;
-    std::vector<float> buf;
-    int64_t pos = 0;
     bool ok = f != nullptr;
-
-    while (ok && pos < total) {
-        const size_t n = (size_t)std::min(kChunk, total - pos);
-        raw.resize(n);
-        buf.resize(n);
-        if (fseeko(f, (off_t)pos * (off_t)sizeof(int16_t), SEEK_SET) != 0 ||
-            fread(raw.data(), sizeof(int16_t), n, f) != n) {
-            ok = false;
-            break;
+    int64_t done = 0;
+    for (size_t k = 0; ok && k < order.size(); ++k) {
+        Span &s = spans[order[k]];
+        const int64_t len = s.to - s.from;
+        if (len < kRate / 5) continue; // nothing to hear
+        const bool known = s.speaker >= 0 && s.speaker < (int)speaker_lang.size() &&
+                           !speaker_lang[s.speaker].empty();
+        if (pieces && s.lang == "auto" && len < kShortTurn && known) {
+            s.lang = speaker_lang[s.speaker];
         }
-        for (size_t i = 0; i < n; ++i) buf[i] = raw[i] / 32768.0f;
-        const size_t use = (pos + (int64_t)n < total) ? quiet_split(buf, n) : n;
-
-        whisper_full_params wp = whisper_full_default_params(WHISPER_SAMPLING_GREEDY);
-        wp.n_threads = n_threads > 0 ? n_threads : 4;
-        wp.language = lang.c_str();
-        wp.translate = false;
-        wp.print_progress = false;
-        wp.print_realtime = false;
-        wp.print_timestamps = false;
-        wp.print_special = false;
-        wp.token_timestamps = true;
-
-        ProgressCtx pc{job, kDecodeShare + (int)((1000 - kDecodeShare) * pos / total),
-                       (int)((1000 - kDecodeShare) * (int64_t)use / total)};
-        wp.progress_callback = on_progress;
-        wp.progress_callback_user_data = &pc;
-        wp.abort_callback = on_abort;
-        wp.abort_callback_user_data = job;
-
-        if (whisper_full(ctx, wp, buf.data(), (int)use) != 0) {
-            ok = false;
-            break;
+        ok = transcribe_span(ctx, f, s, n_threads, job, done, work);
+        done += len;
+        if (ok && pieces && len >= kShortTurn && s.speaker >= 0 && s.lang != "auto") {
+            if (s.speaker >= (int)speaker_lang.size()) speaker_lang.resize(s.speaker + 1);
+            speaker_lang[s.speaker] = s.lang;
         }
-        if (lang == "auto") {
-            // Keep later chunks in the language detected for the first one.
-            const char *detected = whisper_lang_str(whisper_full_lang_id(ctx));
-            if (detected) lang = detected;
-        }
-
-        const double offset = (double)pos / kRate;
-        const int segments = whisper_full_n_segments(ctx);
-        for (int i = 0; i < segments; ++i) {
-            char times[64];
-            snprintf(times, sizeof times, "{\"start\":%.2f,\"end\":%.2f,\"text\":",
-                     offset + whisper_full_get_segment_t0(ctx, i) / 100.0,
-                     offset + whisper_full_get_segment_t1(ctx, i) / 100.0);
-            if (!first) out += ',';
-            first = false;
-            out += times;
-            json_str(out, whisper_full_get_segment_text(ctx, i));
-            append_words(out, ctx, i, offset);
-            out += '}';
-        }
-        pos += (int64_t)use;
     }
 
     if (f) fclose(f);
@@ -513,13 +576,28 @@ LS_API char *ls_transcribe(const char *model_path, const char *audio_path, const
 
     if (!ok) return json_error(job->cancel.load() ? "cancelled" : "Transcription failed.");
 
-    out += "],\"language\":";
-    if (lang == "auto") {
-        out += "null";
+    auto append_lang = [](std::string &out, const std::string &l) {
+        if (l == "auto") {
+            out += "null";
+        } else {
+            json_str(out, l.c_str());
+        }
+    };
+    std::string out;
+    if (pieces) {
+        out = "{\"pieces\":[";
+        for (size_t i = 0; i < spans.size(); ++i) {
+            if (i) out += ',';
+            out += "{\"language\":";
+            append_lang(out, spans[i].lang);
+            out += ",\"segments\":[" + spans[i].json + "]}";
+        }
+        out += "]}";
     } else {
-        json_str(out, lang.c_str());
+        out = "{\"segments\":[" + spans[0].json + "],\"language\":";
+        append_lang(out, spans[0].lang);
+        out += '}';
     }
-    out += '}';
     job->progress = 1000;
     return strdup(out.c_str());
 }

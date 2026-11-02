@@ -1,5 +1,8 @@
 import 'dart:io';
 import '../ai/ai_types.dart';
+import '../diarization/diarizer.dart';
+
+export '../diarization/diarizer.dart' show SpeakerPiece;
 
 /// Lets the caller stop a running transcription.
 class CancelSignal {
@@ -36,6 +39,15 @@ abstract class Transcriber {
   Future<TranscriptResult> transcribe(
     File audio, {
     String? language,
+    void Function(double progress)? onProgress,
+    CancelSignal? cancel,
+  });
+
+  /// Transcribes each of [pieces] (speaker turns) on its own so each detects
+  /// its own language. Segments come back labelled with the piece's speaker.
+  Future<TranscriptResult> transcribePieces(
+    File audio,
+    List<SpeakerPiece> pieces, {
     void Function(double progress)? onProgress,
     CancelSignal? cancel,
   });

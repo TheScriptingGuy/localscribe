@@ -99,6 +99,16 @@ it split a sentence exactly where the speaker changes. Tap a speaker label to
 name them; picking another speaker's name merges the two. Notes and Ask-AI get
 the transcript as `Name: text` lines.
 
+**Mixed-language conversations.** Whisper picks one language per recording,
+so in a meeting that switches between, say, English and German it writes
+everything in one of them. Set *Spoken language* to **Mixed — detect per
+speaker turn**: speakers are then identified first and each turn is
+transcribed on its own, in its own language. Turns under 3 s ("Ja.", "OK")
+reuse the language their speaker used in longer turns. This costs time when
+there are many short turns, since whisper processes at least 30 s of audio
+per call. It works on-device and with a Whisper API URL (the phone then
+uploads each turn as a small WAV).
+
 Speakers are per recording (Speaker 1 in two recordings may be different
 people). Overlapping speech and very short replies are the usual mistakes.
 

@@ -12,6 +12,7 @@ import 'theme.dart';
 /// Spoken-language choices for transcription ('auto' = detect).
 const _languages = {
   'auto': 'Detect automatically',
+  mixedLanguages: 'Mixed — detect per speaker turn',
   'en': 'English',
   'nl': 'Dutch',
   'de': 'German',
@@ -83,6 +84,15 @@ class _OptionsScreenState extends State<OptionsScreen> {
               settings.save();
             },
           ),
+          if (t.language == mixedLanguages)
+            _Hint(sp.enabled
+                ? 'For conversations in several languages. Speakers are '
+                    'identified first, then each turn is transcribed on its '
+                    'own in its own language. Slower when there are many '
+                    'short turns.'
+                : 'Needs speaker recognition (below) to tell the turns '
+                    'apart. Until it is on, the language is detected once '
+                    'per recording.'),
           if (!t.onDevice) ...[
             _field('API base URL', t.remote.baseUrl,
                 hint: 'https://api.openai.com/v1',

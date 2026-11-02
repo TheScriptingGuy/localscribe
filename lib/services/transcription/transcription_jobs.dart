@@ -1,10 +1,12 @@
 import 'package:flutter/foundation.dart';
 
+import '../../models/ai_config.dart';
 import '../../models/recording.dart';
 import '../../settings/settings.dart';
 import '../ai/ai_factory.dart';
 import '../ai/ai_types.dart';
 import '../audio/recording_service.dart';
+import '../diarization/diarizer.dart';
 import '../diarization/speaker_merge.dart';
 import '../library/recording_store.dart';
 import '../models/speaker_models.dart';
@@ -98,11 +100,48 @@ class TranscriptionJobs extends ChangeNotifier {
         await RecordingService.startTranscribing(rec.title).catchError((_) {});
       }
 
+      Future<List<SpeakerTurn>> diarize() {
+        job
+          ..phase = JobPhase.speakers
+          ..progress = null;
+        notifyListeners();
+        return AiFactory.diarizer(sConfig, models: speakerModels).diarize(
+          store.audioOf(rec),
+          numSpeakers: sConfig.numSpeakers,
+          cancel: job.cancel,
+          onProgress: report,
+        );
+      }
+
+      // Mixed languages: find the speaker turns first, then transcribe each
+      // turn on its own so each gets its own language.
+      if (transcribe && speakers && tConfig.language == mixedLanguages) {
+        final transcriber = AiFactory.transcriber(tConfig, models: models);
+        final pieces = speakerPieces(await diarize());
+        if (store.byId(rec.id) == null) return;
+        job
+          ..phase = JobPhase.transcribing
+          ..progress = null;
+        notifyListeners();
+        rec.transcript = pieces.isEmpty
+            ? await transcriber.transcribe(store.audioOf(rec),
+                cancel: job.cancel, onProgress: report)
+            : await transcriber.transcribePieces(store.audioOf(rec), pieces,
+                cancel: job.cancel, onProgress: report);
+        if (store.byId(rec.id) == null) return;
+        rec.speakerNames.clear();
+        await store.save(rec);
+        return;
+      }
+
       if (transcribe) {
         final transcriber = AiFactory.transcriber(tConfig, models: models);
+        final language = tConfig.language;
         final result = await transcriber.transcribe(
           store.audioOf(rec),
-          language: tConfig.language == 'auto' ? null : tConfig.language,
+          language: language == 'auto' || language == mixedLanguages
+              ? null
+              : language,
           cancel: job.cancel,
           onProgress: report,
         );
@@ -116,18 +155,7 @@ class TranscriptionJobs extends ChangeNotifier {
 
       final transcript = rec.transcript;
       if (speakers && transcript != null && transcript.segments.isNotEmpty) {
-        job
-          ..phase = JobPhase.speakers
-          ..progress = null;
-        notifyListeners();
-        final diarizer =
-            AiFactory.diarizer(sConfig, models: speakerModels);
-        final turns = await diarizer.diarize(
-          store.audioOf(rec),
-          numSpeakers: sConfig.numSpeakers,
-          cancel: job.cancel,
-          onProgress: report,
-        );
+        final turns = await diarize();
         if (store.byId(rec.id) == null) return;
         rec.transcript = assignSpeakers(transcript, turns);
         rec.speakerNames.clear();

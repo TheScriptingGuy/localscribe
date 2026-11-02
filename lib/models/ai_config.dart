@@ -83,11 +83,15 @@ class RemoteWhisperConfig {
       );
 }
 
+/// [TranscriptionConfig.language] for conversations in several languages:
+/// with speaker recognition on, each speaker turn detects its own language.
+const mixedLanguages = 'mixed';
+
 /// Transcription pipeline config: on-device whisper.cpp OR a remote URL.
 class TranscriptionConfig {
   bool onDevice;
   String localModel; // whisper.cpp GGML model file, see whisper_models.dart
-  String language; // ISO 639-1 code, or 'auto' to detect
+  String language; // ISO 639-1 code, 'auto' to detect, or [mixedLanguages]
   RemoteWhisperConfig remote;
 
   TranscriptionConfig({

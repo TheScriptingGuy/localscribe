@@ -52,6 +52,82 @@ TranscriptResult assignSpeakers(TranscriptResult t, List<SpeakerTurn> turns) {
   return _withSegments(t, renamed);
 }
 
+/// Turns diarization [turns] into pieces to transcribe one by one: a turn
+/// is joined to the previous one when it's the same voice less than
+/// [maxGap] s later, a short turn inside another voice's turn ("mm-hm") is
+/// dropped, and overlapping turns are cut halfway through the overlap.
+/// Pieces get [pad] s of context where there's room. Speakers are numbered
+/// S1, S2, … in order of first appearance.
+List<SpeakerPiece> speakerPieces(List<SpeakerTurn> turns,
+    {double maxGap = 1.5, double pad = 0.2}) {
+  final sorted = [...turns]..sort((a, b) => a.start.compareTo(b.start));
+  final merged = <SpeakerTurn>[];
+  for (final t in sorted) {
+    if (t.end <= t.start) continue;
+    if (merged.isEmpty) {
+      merged.add(t);
+      continue;
+    }
+    final last = merged.last;
+    if (t.end <= last.end && t.speaker != last.speaker) continue;
+    if (t.speaker == last.speaker && t.start - last.end < maxGap) {
+      merged[merged.length - 1] = SpeakerTurn(
+          last.start, t.end > last.end ? t.end : last.end, last.speaker);
+    } else {
+      merged.add(t);
+    }
+  }
+
+  final ids = <String, String>{};
+  final pieces = <SpeakerPiece>[];
+  for (var i = 0; i < merged.length; i++) {
+    final t = merged[i];
+    final prev = i > 0 ? merged[i - 1] : null;
+    final next = i + 1 < merged.length ? merged[i + 1] : null;
+    // Halfway to the neighbour, but at most `pad` beyond the turn.
+    var start = t.start - pad;
+    if (start < 0) start = 0;
+    if (prev != null) {
+      final mid = (prev.end + t.start) / 2;
+      if (start < mid) start = mid;
+    }
+    var end = t.end + pad;
+    if (next != null) {
+      final mid = (t.end + next.start) / 2;
+      if (end > mid) end = mid;
+    }
+    if (end <= start) continue;
+    pieces.add(SpeakerPiece(start, end,
+        ids.putIfAbsent(t.speaker, () => 'S${ids.length + 1}')));
+  }
+  return pieces;
+}
+
+/// Joins per-piece transcripts into one. Each segment takes its piece's
+/// speaker; [TranscriptResult.language] lists the languages heard, most
+/// spoken first ("en, de").
+TranscriptResult joinPieces(List<SpeakerPiece> pieces,
+    List<({String? language, List<TranscriptSegment> segments})> results) {
+  final segments = <TranscriptSegment>[];
+  final spoken = <String, double>{};
+  for (var i = 0; i < pieces.length && i < results.length; i++) {
+    final r = results[i];
+    if (r.segments.isEmpty) continue;
+    if (r.language != null) {
+      spoken[r.language!] = (spoken[r.language!] ?? 0) + pieces[i].duration;
+    }
+    segments.addAll(r.segments.map((s) => s.withSpeaker(pieces[i].speaker)));
+  }
+  segments.sort((a, b) => a.start.compareTo(b.start));
+  final languages = spoken.keys.toList()
+    ..sort((a, b) => spoken[b]!.compareTo(spoken[a]!));
+  return TranscriptResult(
+    text: segments.map((s) => s.text).join(' '),
+    segments: segments,
+    language: languages.isEmpty ? null : languages.join(', '),
+  );
+}
+
 TranscriptResult _withSegments(TranscriptResult t, List<TranscriptSegment> s) =>
     TranscriptResult(text: t.text, segments: s, language: t.language);
 
