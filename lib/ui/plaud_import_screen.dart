@@ -7,7 +7,9 @@ import 'package:permission_handler/permission_handler.dart';
 import 'package:provider/provider.dart';
 
 import '../models/recording.dart';
+import '../services/ble/plaud_container.dart';
 import '../services/ble/plaud_credentials.dart';
+import '../services/ble/plaud_crypto.dart';
 import '../services/ble/plaud_device.dart';
 import '../services/library/recording_store.dart';
 import 'plaud_credentials_screen.dart';
@@ -62,9 +64,26 @@ class _PlaudImportScreenState extends State<PlaudImportScreen> {
     // Persist whatever came down.
     final store = context.read<RecordingStore>();
     final tmp = await getTemporaryDirectory();
+    final pem = cred.rsaPrivateKeyPem;
+    final priv = (pem == null || pem.isEmpty)
+        ? null
+        : PlaudCrypto.privateKeyFromPem(pem);
     for (final d in _session.downloads) {
-      final f = File(p.join(tmp.path, 'plaud_${d.fileId.toRadixString(16)}.plaud'));
-      await f.writeAsBytes(d.bytes, flush: true);
+      final stem = 'plaud_${d.fileId.toRadixString(16)}';
+      // The container is Opus masked with a ChaCha20 keystream; unmask it and
+      // wrap the packets in Ogg so the normal decode → transcribe path works.
+      File f;
+      try {
+        if (priv == null) throw StateError('no RSA key imported');
+        f = File(p.join(tmp.path, '$stem.opus'));
+        await f.writeAsBytes(
+            PlaudContainer(d.bytes).toOggOpus(priv), flush: true);
+      } catch (e) {
+        // Keep the raw container rather than losing the recording.
+        debugPrint('plaud: container decode failed for $stem: $e');
+        f = File(p.join(tmp.path, '$stem.plaud'));
+        await f.writeAsBytes(d.bytes, flush: true);
+      }
       await store.add(
         f,
         title: 'Plaud Note ${d.fileId.toRadixString(16)}',
