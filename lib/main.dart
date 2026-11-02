@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import 'services/audio/recording_service.dart';
+import 'services/ble/plaud_credentials.dart';
 import 'services/library/recording_store.dart';
 import 'services/models/llm_models.dart';
 import 'services/models/speaker_models.dart';
@@ -10,6 +11,7 @@ import 'services/notes/note_jobs.dart';
 import 'services/templates/template_repository.dart';
 import 'services/transcription/transcription_jobs.dart';
 import 'settings/settings.dart';
+import 'ui/plaud_import_screen.dart';
 import 'ui/record_screen.dart';
 import 'ui/recordings_screen.dart';
 import 'ui/templates_screen.dart';
@@ -37,6 +39,9 @@ Future<void> main() async {
   final llmModels = LlmModelManager();
   await llmModels.load();
 
+  final plaudCredentials = PlaudCredentials();
+  await plaudCredentials.load();
+
   runApp(LocalScribeApp(
     settings: settings,
     templates: templates,
@@ -44,6 +49,7 @@ Future<void> main() async {
     models: models,
     speakerModels: speakerModels,
     llmModels: llmModels,
+    plaudCredentials: plaudCredentials,
     jobs: TranscriptionJobs(
       store: recordings,
       settings: settings,
@@ -66,6 +72,7 @@ class LocalScribeApp extends StatelessWidget {
   final WhisperModelManager models;
   final SpeakerModelManager speakerModels;
   final LlmModelManager llmModels;
+  final PlaudCredentials plaudCredentials;
   final TranscriptionJobs jobs;
   final NoteJobs noteJobs;
 
@@ -77,6 +84,7 @@ class LocalScribeApp extends StatelessWidget {
     required this.models,
     required this.speakerModels,
     required this.llmModels,
+    required this.plaudCredentials,
     required this.jobs,
     required this.noteJobs,
   });
@@ -91,6 +99,7 @@ class LocalScribeApp extends StatelessWidget {
         ChangeNotifierProvider.value(value: models),
         ChangeNotifierProvider.value(value: speakerModels),
         ChangeNotifierProvider.value(value: llmModels),
+        ChangeNotifierProvider.value(value: plaudCredentials),
         ChangeNotifierProvider.value(value: jobs),
         ChangeNotifierProvider.value(value: noteJobs),
       ],
@@ -139,6 +148,12 @@ class _RootShellState extends State<RootShell> {
                 subtitle: 'MP3, M4A, WAV and other audio files',
                 onTap: () => Navigator.pop(ctx, 'import'),
               ),
+              _SheetAction(
+                icon: Icons.bluetooth_outlined,
+                title: 'Plaud device',
+                subtitle: 'Sync recordings from your recorder over Bluetooth',
+                onTap: () => Navigator.pop(ctx, 'plaud'),
+              ),
             ],
           ),
         ),
@@ -151,6 +166,9 @@ class _RootShellState extends State<RootShell> {
             .push(MaterialPageRoute(builder: (_) => const RecordScreen()));
       case 'import':
         await importAudio(context);
+      case 'plaud':
+        Navigator.of(context)
+            .push(MaterialPageRoute(builder: (_) => const PlaudImportScreen()));
     }
   }
 

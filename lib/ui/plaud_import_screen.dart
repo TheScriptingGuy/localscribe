@@ -1,0 +1,190 @@
+import 'dart:io';
+
+import 'package:flutter/material.dart';
+import 'package:path/path.dart' as p;
+import 'package:path_provider/path_provider.dart';
+import 'package:permission_handler/permission_handler.dart';
+import 'package:provider/provider.dart';
+
+import '../models/recording.dart';
+import '../services/ble/plaud_credentials.dart';
+import '../services/ble/plaud_device.dart';
+import '../services/library/recording_store.dart';
+import 'plaud_credentials_screen.dart';
+import 'theme.dart';
+
+/// Import recordings straight from the user's Plaud recorder over BLE — no
+/// Plaud app, no Plaud servers.
+class PlaudImportScreen extends StatefulWidget {
+  const PlaudImportScreen({super.key});
+
+  @override
+  State<PlaudImportScreen> createState() => _PlaudImportScreenState();
+}
+
+class _PlaudImportScreenState extends State<PlaudImportScreen> {
+  final _session = PlaudDeviceSession();
+  bool _running = false;
+  int _saved = 0;
+
+  @override
+  void dispose() {
+    _session.dispose();
+    super.dispose();
+  }
+
+  Future<bool> _ensurePermissions() async {
+    final res = await [
+      Permission.bluetoothScan,
+      Permission.bluetoothConnect,
+      Permission.locationWhenInUse,
+    ].request();
+    // On Android 12+ the bluetooth* perms matter; on older, location does.
+    return res[Permission.bluetoothScan]?.isGranted != false &&
+        res[Permission.bluetoothConnect]?.isGranted != false &&
+        (res[Permission.locationWhenInUse]?.isGranted ??
+            true); // granted or not-applicable
+  }
+
+  Future<void> _sync(PlaudCredentials cred, PlaudDeviceCred dev) async {
+    if (!await _ensurePermissions()) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+          content: Text('Bluetooth/Location permission is required')));
+      return;
+    }
+    setState(() {
+      _running = true;
+      _saved = 0;
+    });
+    await _session.sync(cred, dev);
+    if (!mounted) return;
+    // Persist whatever came down.
+    final store = context.read<RecordingStore>();
+    final tmp = await getTemporaryDirectory();
+    for (final d in _session.downloads) {
+      final f = File(p.join(tmp.path, 'plaud_${d.fileId.toRadixString(16)}.plaud'));
+      await f.writeAsBytes(d.bytes, flush: true);
+      await store.add(
+        f,
+        title: 'Plaud Note ${d.fileId.toRadixString(16)}',
+        source: RecordingSource.plaud,
+        move: true,
+      );
+      _saved++;
+    }
+    if (!mounted) return;
+    setState(() => _running = false);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final cred = context.watch<PlaudCredentials>();
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text('Plaud device'),
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.key_outlined),
+            tooltip: 'Credentials',
+            onPressed: () => Navigator.of(context).push(MaterialPageRoute(
+                builder: (_) => const PlaudCredentialsScreen())),
+          ),
+        ],
+      ),
+      body: !cred.isConfigured
+          ? _needsCredentials(context)
+          : _syncBody(context, cred),
+    );
+  }
+
+  Widget _needsCredentials(BuildContext context) => Center(
+        child: Padding(
+          padding: const EdgeInsets.all(24),
+          child: Column(mainAxisSize: MainAxisSize.min, children: [
+            const Icon(Icons.key_outlined, size: 48, color: Palette.muted),
+            const SizedBox(height: 16),
+            const Text(
+              'Import your Plaud credentials first to connect to your recorder.',
+              textAlign: TextAlign.center,
+              style: TextStyle(color: Palette.muted),
+            ),
+            const SizedBox(height: 16),
+            FilledButton(
+              onPressed: () => Navigator.of(context).push(MaterialPageRoute(
+                  builder: (_) => const PlaudCredentialsScreen())),
+              child: const Text('Set up credentials'),
+            ),
+          ]),
+        ),
+      );
+
+  Widget _syncBody(BuildContext context, PlaudCredentials cred) {
+    final dev = cred.devices.first;
+    return AnimatedBuilder(
+      animation: _session,
+      builder: (context, _) {
+        return ListView(
+          padding: const EdgeInsets.all(16),
+          children: [
+            ListTile(
+              contentPadding: EdgeInsets.zero,
+              leading: const Icon(Icons.memory),
+              title: Text(dev.name),
+              subtitle: Text('serial ${dev.serial}'),
+            ),
+            const SizedBox(height: 8),
+            FilledButton.icon(
+              onPressed: _running ? null : () => _sync(cred, dev),
+              icon: const Icon(Icons.bluetooth_searching),
+              label: Text(_running ? 'Syncing…' : 'Connect & sync'),
+            ),
+            const SizedBox(height: 16),
+            Row(children: [
+              Text(_statusLabel(_session.status),
+                  style: const TextStyle(fontWeight: FontWeight.w700)),
+              const SizedBox(width: 8),
+              Expanded(child: Text(_session.message,
+                  style: const TextStyle(color: Palette.muted))),
+            ]),
+            if (_session.status == PlaudStatus.syncing && _session.progress > 0)
+              Padding(
+                padding: const EdgeInsets.symmetric(vertical: 8),
+                child: LinearProgressIndicator(value: _session.progress),
+              ),
+            if (_saved > 0)
+              Padding(
+                padding: const EdgeInsets.only(top: 8),
+                child: Text('Saved $_saved recording(s) to the library.'),
+              ),
+            const SizedBox(height: 16),
+            const Text('Log', style: TextStyle(fontWeight: FontWeight.w700)),
+            const SizedBox(height: 4),
+            Container(
+              padding: const EdgeInsets.all(10),
+              decoration: BoxDecoration(
+                color: Palette.fill,
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: SelectableText(
+                _session.log.isEmpty ? '—' : _session.log.join('\n'),
+                style: const TextStyle(
+                    fontFamily: 'monospace', fontSize: 11, height: 1.4),
+              ),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
+  String _statusLabel(PlaudStatus s) => switch (s) {
+        PlaudStatus.idle => 'Ready',
+        PlaudStatus.scanning => 'Scanning',
+        PlaudStatus.connecting => 'Connecting',
+        PlaudStatus.handshaking => 'Handshake',
+        PlaudStatus.syncing => 'Syncing',
+        PlaudStatus.done => 'Done',
+        PlaudStatus.error => 'Error',
+      };
+}

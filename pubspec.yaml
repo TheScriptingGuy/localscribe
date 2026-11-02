@@ -40,8 +40,12 @@ dependencies:
   sherpa_onnx: 2.0.1
   ffi: ^2.1.0
 
-  # BLE (Plaud device): package added in Phase 5. flutter_blue_plus 1.x
-  # pins compileSdk 33 (breaks current AndroidX) and 2.x changed license.
+  # BLE (Plaud device, Phase 5). flutter_reactive_ble is Apache-2.0 (FOSS),
+  # unlike flutter_blue_plus 1.x (compileSdk 33) / 2.x (non-free license).
+  flutter_reactive_ble: ^5.3.1
+  permission_handler: ^11.3.1
+  # RSA PEM parsing for the imported Plaud key (thin wrapper over pointycastle).
+  basic_utils: ^5.7.0
 
   # Crypto (BLE handshake + general)
   pointycastle: ^3.7.4
