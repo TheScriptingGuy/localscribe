@@ -50,7 +50,7 @@ lib/
   services/
     ai/                          AiBackend abstraction (local | remote)
     transcription/               TranscriptionService: whisper.cpp | remote Whisper URL
-    notes/                       NoteAiService: llama.cpp | OpenAI URL | Anthropic URL
+    notes/                       NoteGenerator: llama.cpp | OpenAI URL | Anthropic URL
     templates/                   bundled + user templates, prompt synthesis
     recording/                   phone-mic capture + file import
     ble/                         Plaud BLE client (RSA handshake + ChaCha20-Poly1305)
@@ -156,7 +156,10 @@ and run `flutter build apk --release`.
   the transcribe→note flow, Ask-AI chat.
 - **Phase 3 ✅** on-device `whisper.cpp` (FFI + NDK build in CI) + model downloader.
   Speaker recognition on-device (`sherpa-onnx`) or via a self-hosted API.
-- **Phase 4:** on-device `llama.cpp` (GGUF) notes + Ask-AI chat.
+- **Phase 4 ✅** on-device `llama.cpp` (GGUF) notes + Ask-AI chat, with an
+  in-app model downloader (Qwen2.5 / Qwen3). The model stays loaded between
+  calls so a follow-up question reuses the transcript it already read; a
+  transcript too long for the model's context is condensed part by part first.
 - **Phase 5:** Plaud BLE live capture (RSA handshake + ChaCha20-Poly1305 + Opus).
 
 ### Known risk — BLE pairing vs. "no Plaud servers"
