@@ -36,17 +36,13 @@ class _PlaudCredentialsScreenState extends State<PlaudCredentialsScreen> {
       _error = null;
     });
     try {
-      final res = await FilePicker.platform.pickFiles(
-        type: FileType.custom,
-        allowedExtensions: ['json'],
-        withData: true,
-      );
-      if (res == null) {
+      final picked = await FilePicker.pickFile(type: FileType.any);
+      final path = picked?.path;
+      if (path == null) {
         setState(() => _busy = false);
         return;
       }
-      final bytes = res.files.single.bytes ??
-          await File(res.files.single.path!).readAsBytes();
+      final bytes = await File(path).readAsBytes();
       final j = jsonDecode(utf8.decode(bytes)) as Map<String, dynamic>;
       final cred = context.read<PlaudCredentials>();
       await cred.setIdentity(
