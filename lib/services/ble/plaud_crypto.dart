@@ -117,8 +117,9 @@ class PlaudCrypto {
     final ephPriv = ECPrivateKey(d, domain);
 
     final ephBytes = ephPub.Q!.getEncoded(false); // 65 bytes uncompressed
-    final sharedPoint = serverPoint * ephPriv.d!;
-    final sharedBytes = sharedPoint!.getEncoded(false); // 65 bytes uncompressed
+    final agreement = ECDHBasicAgreement()..init(ephPriv);
+    final sharedX = agreement.calculateAgreement(ECPublicKey(serverPoint, domain));
+    final sharedBytes = _pointBytes(sharedX, _secp256k1Y(sharedX));
 
     final ikm = Uint8List.fromList([...ephBytes, ...sharedBytes]);
     final hkdf = HKDFKeyDerivator(SHA256Digest())
@@ -159,8 +160,9 @@ class PlaudCrypto {
 
     final ephPoint = domain.curve.decodePoint(ephBytes)!;
     final priv = ECPrivateKey(BigInt.parse(privKeyHex, radix: 16), domain);
-    final sharedPoint = ephPoint * priv.d!;
-    final sharedBytes = sharedPoint!.getEncoded(false);
+    final agreement = ECDHBasicAgreement()..init(priv);
+    final sharedX = agreement.calculateAgreement(ECPublicKey(ephPoint, domain));
+    final sharedBytes = _pointBytes(sharedX, _secp256k1Y(sharedX));
 
     final ikm = Uint8List.fromList([...ephBytes, ...sharedBytes]);
     final hkdf = HKDFKeyDerivator(SHA256Digest())
@@ -229,6 +231,23 @@ class PlaudCrypto {
     final p = _secp256k1P();
     final y2 = (x.modPow(BigInt.from(3), p) + BigInt.from(7)) % p;
     return y2.modPow((p + BigInt.one) >> 2, p); // p ≡ 3 (mod 4)
+  }
+
+  /// Encode an uncompressed secp256k1 point (0x04 || x || y).
+  static Uint8List _pointBytes(BigInt x, BigInt y) {
+    final out = Uint8List(65);
+    out[0] = 0x04;
+    _bigIntInto(out, 1, x);
+    _bigIntInto(out, 33, y);
+    return out;
+  }
+
+  static void _bigIntInto(Uint8List buf, int off, BigInt v) {
+    var tmp = v;
+    for (var i = 31; i >= 0; i--) {
+      buf[off + i] = (tmp & BigInt.from(0xff)).toInt();
+      tmp = tmp >> 8;
+    }
   }
 
   static BigInt _bytesToBigInt(Uint8List b) {
