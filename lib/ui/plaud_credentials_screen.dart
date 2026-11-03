@@ -4,6 +4,7 @@ import 'dart:typed_data';
 
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
+import 'package:dio/dio.dart';
 import 'package:provider/provider.dart';
 
 import '../services/ble/plaud_credentials.dart';
@@ -144,9 +145,14 @@ class _PlaudCredentialsScreenState extends State<PlaudCredentialsScreen> {
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
           content: Text('Plaud key loaded — connect the recorder to use it.')));
     } catch (e) {
+      var msg = '$e';
+      if (e is DioException) {
+        msg = '${e.requestOptions.method} ${e.requestOptions.uri}\n'
+            'HTTP ${e.response?.statusCode} (${e.type.name})';
+      }
       setState(() {
         _busy = false;
-        _error = '$e';
+        _error = msg;
       });
     }
   }

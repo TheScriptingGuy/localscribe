@@ -1,9 +1,38 @@
 import 'dart:convert';
+import 'dart:developer' as developer;
 import 'dart:typed_data';
 
 import 'package:dio/dio.dart';
 
 import '../ble/plaud_crypto.dart';
+
+/// Logs every request/response via `dart:developer.log` (visible in `adb logcat`
+/// even in release builds) so a failing endpoint can be identified precisely.
+class _LoggingInterceptor extends Interceptor {
+  @override
+  void onRequest(RequestOptions options, RequestInterceptorHandler handler) {
+    developer.log('REQ ${options.method} ${options.uri}', name: 'PlaudApi');
+    handler.next(options);
+  }
+
+  @override
+  void onResponse(Response response, ResponseInterceptorHandler handler) {
+    developer.log(
+        'RES ${response.requestOptions.method} ${response.requestOptions.uri} '
+        '-> ${response.statusCode}',
+        name: 'PlaudApi');
+    handler.next(response);
+  }
+
+  @override
+  void onError(DioException err, ErrorInterceptorHandler handler) {
+    developer.log(
+        'ERR ${err.requestOptions.method} ${err.requestOptions.uri} '
+        '-> ${err.response?.statusCode} ${err.type.name}',
+        name: 'PlaudApi');
+    handler.next(err);
+  }
+}
 
 /// Consumer Plaud cloud API (`https://api.plaud.ai`) — the undocumented API the
 /// Plaud app itself uses. LocalScribe uses it only for the *optional* "sign in to
@@ -50,12 +79,12 @@ class PlaudCloudApi {
   PlaudCloudApi({String? baseUrl, Dio? dio})
       : baseUrl = baseUrl ?? 'https://api.plaud.ai',
         _dio = dio ??
-            Dio(BaseOptions(
+            (Dio(BaseOptions(
               baseUrl: baseUrl ?? 'https://api.plaud.ai',
               connectTimeout: const Duration(seconds: 15),
               receiveTimeout: const Duration(seconds: 20),
               headers: const {'Content-Type': 'application/json'},
-            ));
+            ))..interceptors.add(_LoggingInterceptor()));
 
   final String baseUrl;
   final Dio _dio;
