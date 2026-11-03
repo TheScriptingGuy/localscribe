@@ -57,7 +57,7 @@ void main() {
     final req = adapter.seen.single;
     final data = req.data as Map<String, dynamic>;
     expect(req.method, 'POST');
-    expect(req.path, '/login/login-email');
+    expect(req.path, '/auth/otp-login');
     expect(data['email'], 'a@b.c');
     expect(data['passwordEncrypted'], 'ENC');
     expect(data.containsKey('password'), isFalse);
@@ -105,7 +105,7 @@ void main() {
 
     expect(session.accessToken, 'AT');
 
-    final loginReq = adapter.seen.firstWhere((r) => r.path == '/login/login-email');
+    final loginReq = adapter.seen.firstWhere((r) => r.path == '/auth/otp-login');
     final data = loginReq.data as Map<String, dynamic>;
     expect(data.containsKey('password'), isFalse);
     final enc = data['passwordEncrypted'] as String;
@@ -130,7 +130,7 @@ void main() {
       switch (o.path) {
         case '/config/security':
           return {'data': {'pass_pub_key': keys.publicPem}};
-        case '/login/login-email':
+        case '/auth/otp-login':
           return {'data': {'access_token': 'AT', 'refresh_token': 'RT'}};
         case '/device/sn-sign':
           return {
