@@ -135,9 +135,11 @@ class PlaudCrypto {
 
     final gcm = GCMBlockCipher(AESEngine())
       ..init(true, AEADParameters(KeyParameter(key), 128, nonce, Uint8List(0)));
-    final sealed = _processAead(gcm, payload); // ciphertext || tag
-    final ciphertext = Uint8List.sublistView(sealed, 0, sealed.length - 16);
-    final tag = Uint8List.sublistView(sealed, sealed.length - 16);
+    final sealed = Uint8List(gcm.getOutputSize(payload.length));
+    var total = gcm.processBytes(payload, 0, payload.length, sealed, 0);
+    total += gcm.doFinal(sealed, total);
+    final ciphertext = Uint8List.sublistView(sealed, 0, total - 16);
+    final tag = Uint8List.sublistView(sealed, total - 16, total);
 
     final envelope = Uint8List(65 + 16 + 16 + ciphertext.length)
       ..setRange(0, 65, ephBytes)
@@ -173,7 +175,10 @@ class PlaudCrypto {
     final ctTag = Uint8List.fromList([...ct, ...tag]);
     final gcm = GCMBlockCipher(AESEngine())
       ..init(false, AEADParameters(KeyParameter(key), 128, nonce, Uint8List(0)));
-    return utf8.decode(_processAead(gcm, ctTag));
+    final plain = Uint8List(gcm.getOutputSize(ctTag.length));
+    var total = gcm.processBytes(ctTag, 0, ctTag.length, plain, 0);
+    total += gcm.doFinal(plain, total);
+    return utf8.decode(Uint8List.sublistView(plain, 0, total));
   }
 
   /// Standard Fernet decrypt (AES-128-CBC + HMAC-SHA256). `token` is the raw
