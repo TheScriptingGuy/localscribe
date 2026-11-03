@@ -100,10 +100,7 @@ class PlaudCrypto {
   /// Payload = AES-256-GCM(16-byte nonce) over `{"pass":…,"time":…}`.
   static String encryptPasswordSecp256k1(String pubKeyHex, String password) {
     final domain = ECCurve_secp256k1();
-    final serverPoint = domain.curve.decodePoint(_hexDecode(pubKeyHex));
-    if (serverPoint == null) {
-      throw ArgumentError('Invalid secp256k1 server public key');
-    }
+    final serverPoint = _decodeServerPoint(domain, pubKeyHex);
 
     // Generate the ephemeral key directly (avoids pointycastle's ECKeyGenerator,
     // whose default SecureRandom() constructor isn't registered).
@@ -201,6 +198,37 @@ class PlaudCrypto {
     final iv = Uint8List.sublistView(data, 9, 25);
     final ct = Uint8List.sublistView(data, 25);
     return utf8.decode(_pkcs7Unpad(_cbcDecrypt(encKey, iv, ct)));
+  }
+
+  /// Decode the server's secp256k1 public key (compressed or uncompressed hex).
+  /// Compressed keys are decompressed manually because pointycastle's
+  /// `decompressPoint` yields a negated `y` for these keys, which breaks the
+  /// ECDH shared-point y used in the HKDF material.
+  static ECPoint _decodeServerPoint(ECDomainParameters domain, String pubKeyHex) {
+    final enc = _hexDecode(pubKeyHex);
+    if (enc.length == 33 && (enc[0] == 0x02 || enc[0] == 0x03)) {
+      final x = _bytesToBigInt(enc.sublist(1));
+      final y = _secp256k1Y(x);
+      final yOdd = (enc[0] & 1) == 1;
+      final p = _secp256k1P();
+      final yCorrect = (y.isOdd == yOdd) ? y : p - y;
+      return domain.curve.createPoint(x, yCorrect, false);
+    }
+    final p = domain.curve.decodePoint(enc);
+    if (p == null) {
+      throw ArgumentError('Invalid secp256k1 server public key');
+    }
+    return p;
+  }
+
+  static BigInt _secp256k1P() => BigInt.parse(
+      'fffffffffffffffffffffffffffffffffffffffffffffffffffffffefffffc2f',
+      radix: 16);
+
+  static BigInt _secp256k1Y(BigInt x) {
+    final p = _secp256k1P();
+    final y2 = (x.modPow(BigInt.from(3), p) + BigInt.from(7)) % p;
+    return y2.modPow((p + BigInt.one) >> 2, p); // p ≡ 3 (mod 4)
   }
 
   static BigInt _bytesToBigInt(Uint8List b) {
