@@ -57,9 +57,9 @@ void main() {
     final req = adapter.seen.single;
     final data = req.data as Map<String, dynamic>;
     expect(req.method, 'POST');
-    expect(req.path, '/auth/otp-login');
+    expect(req.path, '/login/login-email');
     expect(data['email'], 'a@b.c');
-    expect(data['passwordEncrypted'], 'ENC');
+    expect(data['password_encrypted'], 'ENC');
     expect(data.containsKey('password'), isFalse);
     expect(session.accessToken, 'AT');
     expect(session.refreshToken, 'RT');
@@ -78,7 +78,7 @@ void main() {
 
     final data = adapter.seen.single.data as Map<String, dynamic>;
     expect(data['password'], 'hunter2');
-    expect(data.containsKey('passwordEncrypted'), isFalse);
+    expect(data.containsKey('password_encrypted'), isFalse);
   });
 
   test('loginSecure() fetches /config/security and encrypts the password', () async {
@@ -105,10 +105,10 @@ void main() {
 
     expect(session.accessToken, 'AT');
 
-    final loginReq = adapter.seen.firstWhere((r) => r.path == '/auth/otp-login');
+    final loginReq = adapter.seen.firstWhere((r) => r.path == '/login/login-email');
     final data = loginReq.data as Map<String, dynamic>;
     expect(data.containsKey('password'), isFalse);
-    final enc = data['passwordEncrypted'] as String;
+    final enc = data['password_encrypted'] as String;
     // Should be a 256-byte PKCS#1 v1.5 ciphertext, base64 (344 chars).
     expect(base64Decode(enc).length, 256);
     // And should decrypt back with the private key we handed out.
@@ -130,7 +130,7 @@ void main() {
       switch (o.path) {
         case '/config/security':
           return {'data': {'pass_pub_key': keys.publicPem}};
-        case '/auth/otp-login':
+        case '/login/login-email':
           return {'data': {'access_token': 'AT', 'refresh_token': 'RT'}};
         case '/device/sn-sign':
           return {

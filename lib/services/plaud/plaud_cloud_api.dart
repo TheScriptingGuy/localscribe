@@ -107,11 +107,11 @@ class PlaudCloudApi {
   }) async {
     final body = <String, dynamic>{'email': email};
     if (passwordEncrypted != null && passwordEncrypted.isNotEmpty) {
-      body['passwordEncrypted'] = passwordEncrypted;
+      body['password_encrypted'] = passwordEncrypted;
     } else {
       body['password'] = password;
     }
-    final resp = await _dio.post<dynamic>('/auth/otp-login', data: body);
+    final resp = await _dio.post<dynamic>('/login/login-email', data: body);
     final d = _data(resp.data);
     return PlaudSession(
       accessToken: _str(d['access_token']),
