@@ -148,7 +148,9 @@ class _PlaudCredentialsScreenState extends State<PlaudCredentialsScreen> {
       var msg = '$e';
       if (e is DioException) {
         msg = '${e.requestOptions.method} ${e.requestOptions.uri}\n'
-            'HTTP ${e.response?.statusCode} (${e.type.name})';
+            'HTTP ${e.response?.statusCode} (${e.type.name})\n'
+            'sent: ${e.requestOptions.data}\n'
+            'response: ${e.response?.data}';
       }
       setState(() {
         _busy = false;
