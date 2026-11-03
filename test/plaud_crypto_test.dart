@@ -96,7 +96,7 @@ void main() {
     test('decrypts a known Fernet token', () {
       const key = '8rRmMCskL3NaUiGr-UsmEEeI8NKH-ZfeGbpRGqSLpuI=';
       const token =
-          'gAAAAABq6faFOWmt4j5QB8N1icLmLN28oQv5SezCXvkb4J-7raO_lyVPTIhKf5iZ9ps2xThKa2ksQO5Jfs8OuMFjbkek0sjnyslP25Q5sg4ksB8RS_d5tgM=';
+          'gAAAAABq6fqWZQngKcm6YxdN3ha1pWGkHObPa_cWBuKNDFyVrGkmgx9xfwuspkk81glxqAPL3jg81y8F4ndme6p1gqxZ-J0XFL2Us7LtHQXn1DWQZave-rw=';
       expect(PlaudCrypto.fernetDecrypt(token, key), '{"status":0,"msg":"success"}');
     });
   });

@@ -105,11 +105,19 @@ class PlaudCrypto {
       throw ArgumentError('Invalid secp256k1 server public key');
     }
 
-    final keyGen = KeyGenerator('EC');
-    keyGen.init(ECKeyGeneratorParameters(domain));
-    final pair = keyGen.generateKeyPair();
-    final ephPriv = pair.privateKey as ECPrivateKey;
-    final ephPub = pair.publicKey as ECPublicKey;
+    // Generate the ephemeral key directly (avoids pointycastle's ECKeyGenerator,
+    // whose default SecureRandom() constructor isn't registered).
+    final rng = Random.secure();
+    BigInt d;
+    do {
+      final buf = Uint8List(32);
+      for (var i = 0; i < buf.length; i++) {
+        buf[i] = rng.nextInt(256);
+      }
+      d = _bytesToBigInt(buf);
+    } while (d == BigInt.zero || d >= domain.n);
+    final ephPub = ECPublicKey(domain.G * d, domain);
+    final ephPriv = ECPrivateKey(d, domain);
 
     final ephBytes = ephPub.Q!.getEncoded(false); // 65 bytes uncompressed
     final sharedPoint = serverPoint * ephPriv.d!;
@@ -193,6 +201,14 @@ class PlaudCrypto {
     final iv = Uint8List.sublistView(data, 9, 25);
     final ct = Uint8List.sublistView(data, 25);
     return utf8.decode(_pkcs7Unpad(_cbcDecrypt(encKey, iv, ct)));
+  }
+
+  static BigInt _bytesToBigInt(Uint8List b) {
+    var v = BigInt.zero;
+    for (final x in b) {
+      v = (v << 8) | BigInt.from(x);
+    }
+    return v;
   }
 
   static Uint8List _randomBytes(int n) {
