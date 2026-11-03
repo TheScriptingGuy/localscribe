@@ -5,6 +5,7 @@ import 'dart:typed_data';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:dio/dio.dart';
+import 'package:path_provider/path_provider.dart';
 import 'package:provider/provider.dart';
 
 import '../services/ble/plaud_credentials.dart';
@@ -152,6 +153,15 @@ class _PlaudCredentialsScreenState extends State<PlaudCredentialsScreen> {
             'sent: ${e.requestOptions.data}\n'
             'response: ${e.response?.data}';
       }
+      // Persist to external files so the error can be read via adb even though
+      // release builds can't write to logcat.
+      try {
+        final dir = await getExternalFilesDir(null);
+        if (dir != null) {
+          await File('${dir.path}/plaud_error.txt').writeAsString(msg);
+        }
+      } catch (_) {}
+      if (!mounted) return;
       setState(() {
         _busy = false;
         _error = msg;
