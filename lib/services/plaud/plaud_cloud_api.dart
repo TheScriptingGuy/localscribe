@@ -40,11 +40,12 @@ class _LoggingInterceptor extends Interceptor {
   }
 }
 
-/// Consumer Plaud cloud API (`https://api.plaud.ai`) — the undocumented API the
-/// Plaud app itself uses. LocalScribe uses it only for the *optional* "sign in to
-/// Plaud and load the existing key" path: log in with the user's own Plaud account
-/// and fetch the escrowed e2ee key for an already-bound recorder, so recordings can
-/// be decrypted without re-enrolling.
+/// Consumer Plaud cloud API (`https://api-euc1.plaud.ai` — the Europe Central
+/// regional host the Plaud app actually uses, confirmed from its own `[REQ]`/`[RES]`
+/// logcat lines; `api.plaud.ai` is the US default). LocalScribe uses it only for the
+/// *optional* "sign in to Plaud and load the existing key" path: log in with the
+/// user's own Plaud account and fetch the escrowed e2ee key for an already-bound
+/// recorder, so recordings can be decrypted without re-enrolling.
 ///
 /// Endpoints reverse-engineered from the app (see findings/plaud-consumer-api.md).
 /// Login uses `loginSecure`, which RSA-encrypts the password with the server public
@@ -83,10 +84,10 @@ class PlaudCloudKeys {
 
 class PlaudCloudApi {
   PlaudCloudApi({String? baseUrl, Dio? dio})
-      : baseUrl = baseUrl ?? 'https://api.plaud.ai',
+      : baseUrl = baseUrl ?? 'https://api-euc1.plaud.ai',
         _dio = dio ??
             (Dio(BaseOptions(
-              baseUrl: baseUrl ?? 'https://api.plaud.ai',
+              baseUrl: baseUrl ?? 'https://api-euc1.plaud.ai',
               connectTimeout: const Duration(seconds: 15),
               receiveTimeout: const Duration(seconds: 20),
               headers: const {'Content-Type': 'application/json'},
