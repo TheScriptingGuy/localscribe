@@ -7,6 +7,8 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import '../services/ble/plaud_credentials.dart';
+import '../services/ble/plaud_crypto.dart';
+import '../services/plaud/plaud_cloud_api.dart';
 import 'theme.dart';
 
 /// Import the user's own Plaud credentials (RSA key + device public keys) once,
@@ -29,6 +31,18 @@ class PlaudCredentialsScreen extends StatefulWidget {
 class _PlaudCredentialsScreenState extends State<PlaudCredentialsScreen> {
   String? _error;
   bool _busy = false;
+
+  final _emailCtrl = TextEditingController();
+  final _passwordCtrl = TextEditingController();
+  final _serialCtrl = TextEditingController();
+
+  @override
+  void dispose() {
+    _emailCtrl.dispose();
+    _passwordCtrl.dispose();
+    _serialCtrl.dispose();
+    super.dispose();
+  }
 
   Future<void> _importFile() async {
     setState(() {
@@ -69,6 +83,74 @@ class _PlaudCredentialsScreenState extends State<PlaudCredentialsScreen> {
     }
   }
 
+  Future<void> _generateKeypair() async {
+    setState(() {
+      _busy = true;
+      _error = null;
+    });
+    try {
+      final keys = PlaudCrypto.generateKeyPair();
+      final cred = context.read<PlaudCredentials>();
+      // Mint a fresh identity key but keep the account user id + paired device
+      // keys. The recorder will wrap session/at-rest keys to this new public key.
+      await cred.setIdentity(
+        userId: cred.userId ?? '',
+        pem: keys.privatePem,
+      );
+      if (!mounted) return;
+      setState(() => _busy = false);
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+          content: Text('New keypair generated — it will be enrolled on the '
+              'next BLE connect.')));
+    } catch (e) {
+      setState(() {
+        _busy = false;
+        _error = '$e';
+      });
+    }
+  }
+
+  Future<void> _signInToPlaud() async {
+    final email = _emailCtrl.text.trim();
+    final password = _passwordCtrl.text;
+    final serial = _serialCtrl.text.trim();
+    if (email.isEmpty || password.isEmpty || serial.isEmpty) {
+      setState(() => _error = 'Email, password and device serial are required.');
+      return;
+    }
+    setState(() {
+      _busy = true;
+      _error = null;
+    });
+    try {
+      final keys = await PlaudCloudApi().loadExistingKey(email, password, serial);
+      final pem = keys.privateKeyPem;
+      if (pem == null || pem.isEmpty) {
+        throw StateError(
+            'No private key returned by the Plaud API (response shape changed?). '
+            'Check the device serial and try again.');
+      }
+      final cred = context.read<PlaudCredentials>();
+      await cred.setIdentity(userId: keys.userId ?? '', pem: pem);
+      if (keys.devicePublicKey != null) {
+        await cred.upsertDevice(PlaudDeviceCred(
+          serial: serial,
+          name: 'Plaud Note',
+          publicKey: keys.devicePublicKey!,
+        ));
+      }
+      if (!mounted) return;
+      setState(() => _busy = false);
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+          content: Text('Plaud key loaded — connect the recorder to use it.')));
+    } catch (e) {
+      setState(() {
+        _busy = false;
+        _error = '$e';
+      });
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final cred = context.watch<PlaudCredentials>();
@@ -88,6 +170,54 @@ class _PlaudCredentialsScreenState extends State<PlaudCredentialsScreen> {
             onPressed: _busy ? null : _importFile,
             icon: const Icon(Icons.file_open_outlined),
             label: Text(_busy ? 'Importing…' : 'Import credentials file (.json)'),
+          ),
+          const SizedBox(height: 8),
+          OutlinedButton.icon(
+            onPressed: _busy ? null : _generateKeypair,
+            icon: const Icon(Icons.key_outlined),
+            label: Text(_busy ? 'Generating…' : 'Generate new keypair'),
+          ),
+          const SizedBox(height: 24),
+          const Divider(),
+          const SizedBox(height: 8),
+          const Text('Or sign in to Plaud and load your existing key',
+              style: TextStyle(fontWeight: FontWeight.w700)),
+          const SizedBox(height: 4),
+          const Text(
+            'Fetches your escrowed e2ee key from the Plaud cloud so you can '
+            'decrypt existing recordings without re-enrolling. Credentials are '
+            'used once and never stored.',
+            style: TextStyle(color: Palette.muted, height: 1.4),
+          ),
+          const SizedBox(height: 12),
+          TextField(
+            controller: _emailCtrl,
+            keyboardType: TextInputType.emailAddress,
+            autocorrect: false,
+            decoration: const InputDecoration(
+                labelText: 'Plaud account email', border: OutlineInputBorder()),
+          ),
+          const SizedBox(height: 8),
+          TextField(
+            controller: _passwordCtrl,
+            obscureText: true,
+            autocorrect: false,
+            enableSuggestions: false,
+            decoration: const InputDecoration(
+                labelText: 'Password', border: OutlineInputBorder()),
+          ),
+          const SizedBox(height: 8),
+          TextField(
+            controller: _serialCtrl,
+            autocorrect: false,
+            decoration: const InputDecoration(
+                labelText: 'Recorder serial', border: OutlineInputBorder()),
+          ),
+          const SizedBox(height: 12),
+          FilledButton.icon(
+            onPressed: _busy ? null : _signInToPlaud,
+            icon: const Icon(Icons.cloud_download_outlined),
+            label: Text(_busy ? 'Signing in…' : 'Sign in & load key'),
           ),
           if (_error != null) ...[
             const SizedBox(height: 12),

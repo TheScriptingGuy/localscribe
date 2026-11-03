@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:typed_data';
 
 import 'package:flutter/foundation.dart';
@@ -174,6 +175,15 @@ class PlaudDeviceSession extends ChangeNotifier {
   Future<void> _handshake(Uint8List devicePubKey, priv) async {
     _set(PlaudStatus.handshaking, 'Handshaking…');
     for (final f in PlaudProtocol.keyWriteFrames(devicePubKey)) {
+      await _write(f);
+      await Future<void>.delayed(const Duration(milliseconds: 60));
+    }
+    // `12 FE 05`: provision our RSA public key so the device wraps the session
+    // key to US. This is what makes a self-generated (or imported) key "work"
+    // — the recorder accepts whatever user key is written here, no cloud.
+    final userPem = PlaudCrypto.publicKeyPemFromPrivate(priv);
+    final userBytes = Uint8List.fromList(utf8.encode(userPem));
+    for (final f in PlaudProtocol.userKeyWriteFrames(userBytes)) {
       await _write(f);
       await Future<void>.delayed(const Duration(milliseconds: 60));
     }

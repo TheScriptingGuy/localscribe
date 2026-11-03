@@ -20,6 +20,8 @@ class PlaudProtocol {
   static const deviceName = 'PLAUD_NOTE';
 
   // handshake
+  // Device key is presented with `20 FE 03 <seq>` (the first-connect/enroll
+  // variant captured live; `10 FE 03` is the reconnect variant — both work).
   static List<Uint8List> keyWriteFrames(Uint8List devicePublicKey256) {
     assert(devicePublicKey256.length == 256);
     final sizes = [100, 100, 56];
@@ -28,10 +30,34 @@ class PlaudProtocol {
     for (var seq = 0; seq < 3; seq++) {
       final n = sizes[seq];
       final b = BytesBuilder()
-        ..add([0x10, 0xFE, 0x03, seq])
+        ..add([0x20, 0xFE, 0x03, seq])
         ..add(Uint8List.sublistView(devicePublicKey256, off, off + n));
       frames.add(b.toBytes());
       off += n;
+    }
+    return frames;
+  }
+
+  /// `12 FE 05 <seq>` + the user's RSA public key PEM (100-byte chunks).
+  ///
+  /// This is the enrollment/provisioning write: it tells the recorder which
+  /// user public key to wrap session (and at-rest content) keys to. Verified
+  /// against a fresh key in `findings/plaud-fresh-enroll-verified.md` — no cloud
+  /// needed, the device accepts whatever key is presented here.
+  static List<Uint8List> userKeyWriteFrames(List<int> userPublicKeyPem) {
+    final frames = <Uint8List>[];
+    var off = 0;
+    var seq = 0;
+    while (off < userPublicKeyPem.length) {
+      final n = (off + 100 < userPublicKeyPem.length)
+          ? 100
+          : userPublicKeyPem.length - off;
+      final b = BytesBuilder()
+        ..add([0x12, 0xFE, 0x05, seq])
+        ..add(userPublicKeyPem.sublist(off, off + n));
+      frames.add(b.toBytes());
+      off += n;
+      seq++;
     }
     return frames;
   }

@@ -72,6 +72,9 @@ jobs:
       - name: Analyze
         run: flutter analyze || true
 
+      - name: Test (Plaud crypto + cloud API)
+        run: flutter test
+
       - name: Build release APK
         # One APK per CPU ABI: arm64-v8a is the one for any modern phone,
         # x86_64 for emulators. 32-bit ARM is dropped (too slow for whisper).

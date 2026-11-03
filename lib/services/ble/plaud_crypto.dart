@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'dart:typed_data';
 
 import 'package:basic_utils/basic_utils.dart';
@@ -32,11 +33,59 @@ class PlaudCrypto {
   static RSAPublicKey publicKeyFromPem(String pem) =>
       CryptoUtils.rsaPublicKeyFromPem(pem);
 
+  /// Generate a fresh RSA-2048 keypair. Returns (publicPem, privatePem).
+  ///
+  /// This is the "get our own e2ee key" path: the recorder accepts any user
+  /// public key via the `12 FE 05` write (see findings/plaud-fresh-enroll-verified.md),
+  /// so LocalScribe can mint its own key instead of importing the Plaud one.
+  static ({String publicPem, String privatePem}) generateKeyPair() {
+    final pair = CryptoUtils.generateRSAKeyPair(keySize: 2048);
+    final pub = pair.publicKey as RSAPublicKey;
+    final priv = pair.privateKey as RSAPrivateKey;
+    return (
+      publicPem: CryptoUtils.encodeRSAPublicKeyToPem(pub),
+      privatePem: CryptoUtils.encodeRSAPrivateKeyToPem(priv),
+    );
+  }
+
+  /// PEM public key derived from a private key (the `12 FE 05` enrollment write
+  /// sends the *public* key of the same keypair whose private key we unwrap with).
+  static String publicKeyPemFromPrivate(RSAPrivateKey priv) =>
+      CryptoUtils.encodeRSAPublicKeyToPem(
+          RSAPublicKey(priv.modulus!, priv.exponent ?? BigInt.from(65537)));
+
   /// RSA/ECB/PKCS1Padding decrypt (mode used by the device handshake).
   static Uint8List rsaUnwrap(RSAPrivateKey priv, Uint8List wrapped) {
     final cipher = PKCS1Encoding(RSAEngine())
       ..init(false, PrivateKeyParameter<RSAPrivateKey>(priv));
     return _processBlocks(cipher, wrapped);
+  }
+
+  /// RSA PKCS#1 v1.5 encrypt (the app's `RSA_ECB_PKCS1Padding`). Used to wrap
+  /// the login password with the server public key from `/config/security`.
+  static Uint8List rsaEncryptPkcs1(RSAPublicKey pub, Uint8List plain) {
+    final cipher = PKCS1Encoding(RSAEngine())
+      ..init(true, PublicKeyParameter<RSAPublicKey>(pub));
+    return _processBlocks(cipher, plain);
+  }
+
+  /// Parse a server public key that may be PEM or bare base64 (SPKI DER).
+  static RSAPublicKey publicKeyFromAny(String key) {
+    final s = key.trim();
+    if (s.contains('BEGIN')) {
+      return CryptoUtils.rsaPublicKeyFromPem(s);
+    }
+    final b64 = s.replaceAll(RegExp(r'\s'), '');
+    final pem = '-----BEGIN PUBLIC KEY-----\n$b64\n-----END PUBLIC KEY-----';
+    return CryptoUtils.rsaPublicKeyFromPem(pem);
+  }
+
+  /// RSA-encrypt a password with the server public key, base64-encoded — the
+  /// `passwordEncrypted` field of `/login/login-email`.
+  static String encryptPasswordWithPublicKey(String publicKey, String password) {
+    final pub = publicKeyFromAny(publicKey);
+    final enc = rsaEncryptPkcs1(pub, Uint8List.fromList(utf8.encode(password)));
+    return base64Encode(enc);
   }
 
   /// Unwrap the 80-byte handshake payload into session keys.
