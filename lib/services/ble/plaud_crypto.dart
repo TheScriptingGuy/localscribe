@@ -135,15 +135,15 @@ class PlaudCrypto {
 
     final gcm = GCMBlockCipher(AESEngine())
       ..init(true, AEADParameters(KeyParameter(key), 128, nonce, Uint8List(0)));
-    final ct = Uint8List(gcm.getOutputSize(payload.length));
-    final ctLen = gcm.processBytes(payload, 0, payload.length, ct, 0);
-    final tagLen = gcm.doFinal(ct, ctLen);
+    final sealed = _processAead(gcm, payload); // ciphertext || tag
+    final ciphertext = Uint8List.sublistView(sealed, 0, sealed.length - 16);
+    final tag = Uint8List.sublistView(sealed, sealed.length - 16);
 
-    final envelope = Uint8List(65 + 16 + tagLen + ctLen)
+    final envelope = Uint8List(65 + 16 + 16 + ciphertext.length)
       ..setRange(0, 65, ephBytes)
       ..setRange(65, 81, nonce)
-      ..setRange(81, 81 + tagLen, Uint8List.sublistView(ct, ctLen, ctLen + tagLen))
-      ..setRange(81 + tagLen, 81 + tagLen + ctLen, Uint8List.sublistView(ct, 0, ctLen));
+      ..setRange(81, 97, tag)
+      ..setRange(97, 97 + ciphertext.length, ciphertext);
     return base64Encode(envelope);
   }
 
@@ -173,10 +173,7 @@ class PlaudCrypto {
     final ctTag = Uint8List.fromList([...ct, ...tag]);
     final gcm = GCMBlockCipher(AESEngine())
       ..init(false, AEADParameters(KeyParameter(key), 128, nonce, Uint8List(0)));
-    final plain = Uint8List(gcm.getOutputSize(ctTag.length));
-    var len = gcm.processBytes(ctTag, 0, ctTag.length, plain, 0);
-    len += gcm.doFinal(plain, len);
-    return utf8.decode(Uint8List.sublistView(plain, 0, len));
+    return utf8.decode(_processAead(gcm, ctTag));
   }
 
   /// Standard Fernet decrypt (AES-128-CBC + HMAC-SHA256). `token` is the raw
