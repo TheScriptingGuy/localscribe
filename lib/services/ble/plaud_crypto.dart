@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:math';
 import 'dart:typed_data';
 
 import 'package:basic_utils/basic_utils.dart';
@@ -86,6 +87,154 @@ class PlaudCrypto {
     final pub = publicKeyFromAny(publicKey);
     final enc = rsaEncryptPkcs1(pub, Uint8List.fromList(utf8.encode(password)));
     return base64Encode(enc);
+  }
+
+  /// Seal a login password with the server's secp256k1 public key (ECIES), the
+  /// scheme Plaud's web/mobile clients use on `POST /auth/access-token`
+  /// (`password_encrypted=true`). Ported from `jaisonerick/plaud-cli` and
+  /// verified against its eciesjs reference vector + a live login.
+  ///
+  /// Envelope (base64): ephemeralPub.uncompressed(65) || nonce(16) || tag(16)
+  /// || ciphertext. Key = HKDF-SHA256(ephPub || sharedPoint, salt=nil, info="",
+  /// 32) where sharedPoint = ephPriv * serverPub (full point, uncompressed).
+  /// Payload = AES-256-GCM(16-byte nonce) over `{"pass":…,"time":…}`.
+  static String encryptPasswordSecp256k1(String pubKeyHex, String password) {
+    final domain = ECCurve_secp256k1();
+    final serverPoint = domain.curve.decodePoint(_hexDecode(pubKeyHex));
+    if (serverPoint == null) {
+      throw ArgumentError('Invalid secp256k1 server public key');
+    }
+
+    final keyGen = KeyGenerator('EC');
+    keyGen.init(ECKeyGeneratorParameters(domain));
+    final pair = keyGen.generateKeyPair();
+    final ephPriv = pair.privateKey as ECPrivateKey;
+    final ephPub = pair.publicKey as ECPublicKey;
+
+    final ephBytes = ephPub.Q!.getEncoded(false); // 65 bytes uncompressed
+    final sharedPoint = serverPoint * ephPriv.d!;
+    final sharedBytes = sharedPoint!.getEncoded(false); // 65 bytes uncompressed
+
+    final ikm = Uint8List.fromList([...ephBytes, ...sharedBytes]);
+    final hkdf = HKDFKeyDerivator(SHA256Digest())
+      ..init(HkdfParameters(ikm, 32, null, Uint8List(0)));
+    final key = Uint8List(32);
+    hkdf.deriveKey(null, 0, key, 0);
+
+    final payload = utf8.encode(jsonEncode(<String, dynamic>{
+      'pass': password,
+      'time': DateTime.now().millisecondsSinceEpoch ~/ 1000,
+    }));
+    final nonce = _randomBytes(16);
+
+    final gcm = GCMBlockCipher(AESEngine())
+      ..init(true, AEADParameters(KeyParameter(key), 128, nonce, Uint8List(0)));
+    final ct = Uint8List(gcm.getOutputSize(payload.length));
+    final ctLen = gcm.processBytes(payload, 0, payload.length, ct, 0);
+    final tagLen = gcm.doFinal(ct, ctLen);
+
+    final envelope = Uint8List(65 + 16 + tagLen + ctLen)
+      ..setRange(0, 65, ephBytes)
+      ..setRange(65, 81, nonce)
+      ..setRange(81, 81 + tagLen, Uint8List.sublistView(ct, ctLen, ctLen + tagLen))
+      ..setRange(81 + tagLen, 81 + tagLen + ctLen, Uint8List.sublistView(ct, 0, ctLen));
+    return base64Encode(envelope);
+  }
+
+  /// Inverse of [encryptPasswordSecp256k1] — used by tests and for verification
+  /// against the reference vector. `privKeyHex` is the server's secp256k1
+  /// private key (hex); `envelopeB64` is the base64 envelope.
+  static String decryptPasswordSecp256k1(String privKeyHex, String envelopeB64) {
+    final domain = ECCurve_secp256k1();
+    final raw = base64Decode(envelopeB64);
+    final ephBytes = Uint8List.sublistView(raw, 0, 65);
+    final nonce = Uint8List.sublistView(raw, 65, 81);
+    final tag = Uint8List.sublistView(raw, 81, 97);
+    final ct = Uint8List.sublistView(raw, 97);
+
+    final ephPoint = domain.curve.decodePoint(ephBytes)!;
+    final priv = ECPrivateKey(BigInt.parse(privKeyHex, radix: 16), domain);
+    final sharedPoint = ephPoint * priv.d!;
+    final sharedBytes = sharedPoint!.getEncoded(false);
+
+    final ikm = Uint8List.fromList([...ephBytes, ...sharedBytes]);
+    final hkdf = HKDFKeyDerivator(SHA256Digest())
+      ..init(HkdfParameters(ikm, 32, null, Uint8List(0)));
+    final key = Uint8List(32);
+    hkdf.deriveKey(null, 0, key, 0);
+
+    final ctTag = Uint8List.fromList([...ct, ...tag]);
+    final gcm = GCMBlockCipher(AESEngine())
+      ..init(false, AEADParameters(KeyParameter(key), 128, nonce, Uint8List(0)));
+    final plain = Uint8List(gcm.getOutputSize(ctTag.length));
+    var len = gcm.processBytes(ctTag, 0, ctTag.length, plain, 0);
+    len += gcm.doFinal(plain, len);
+    return utf8.decode(Uint8List.sublistView(plain, 0, len));
+  }
+
+  /// Standard Fernet decrypt (AES-128-CBC + HMAC-SHA256). `token` is the raw
+  /// base64url token; `keyBase64Url` is the 32-byte key (sign[0:16] / enc[16:32]).
+  static String fernetDecrypt(String token, String keyBase64Url) {
+    final key = base64Url.decode(base64Url.normalize(keyBase64Url));
+    final raw = base64Url.decode(base64Url.normalize(token));
+    final signKey = Uint8List.sublistView(key, 0, 16);
+    final encKey = Uint8List.sublistView(key, 16, 32);
+    final data = Uint8List.sublistView(raw, 0, raw.length - 32);
+    final mac = Uint8List.sublistView(raw, raw.length - 32);
+
+    final hmac = HMac(SHA256Digest(), 64)..init(KeyParameter(signKey));
+    final calc = Uint8List(32);
+    hmac.update(data, 0, data.length);
+    hmac.doFinal(calc, 0);
+    if (!_constantTimeEquals(calc, mac)) {
+      throw StateError('Fernet HMAC mismatch');
+    }
+
+    final iv = Uint8List.sublistView(data, 9, 25);
+    final ct = Uint8List.sublistView(data, 25);
+    return utf8.decode(_pkcs7Unpad(_cbcDecrypt(encKey, iv, ct)));
+  }
+
+  static Uint8List _randomBytes(int n) {
+    final rng = Random.secure();
+    final b = Uint8List(n);
+    for (var i = 0; i < n; i++) {
+      b[i] = rng.nextInt(256);
+    }
+    return b;
+  }
+
+  static Uint8List _cbcDecrypt(Uint8List key, Uint8List iv, Uint8List ct) {
+    final cbc = CBCBlockCipher(AESEngine())
+      ..init(false, ParametersWithIV(KeyParameter(key), iv));
+    final out = Uint8List(ct.length);
+    for (var off = 0; off < ct.length; off += cbc.blockSize) {
+      cbc.processBlock(ct, off, out, off);
+    }
+    return out;
+  }
+
+  static Uint8List _pkcs7Unpad(Uint8List data) {
+    final pad = data[data.length - 1];
+    return Uint8List.sublistView(data, 0, data.length - pad);
+  }
+
+  static Uint8List _hexDecode(String s) {
+    final clean = s.replaceAll(RegExp(r'\s'), '');
+    final out = Uint8List(clean.length ~/ 2);
+    for (var i = 0; i < out.length; i++) {
+      out[i] = int.parse(clean.substring(i * 2, i * 2 + 2), radix: 16);
+    }
+    return out;
+  }
+
+  static bool _constantTimeEquals(Uint8List a, Uint8List b) {
+    if (a.length != b.length) return false;
+    var diff = 0;
+    for (var i = 0; i < a.length; i++) {
+      diff |= a[i] ^ b[i];
+    }
+    return diff == 0;
   }
 
   /// Unwrap the 80-byte handshake payload into session keys.

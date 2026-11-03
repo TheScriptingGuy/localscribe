@@ -63,4 +63,41 @@ void main() {
       );
     });
   });
+
+  group('PlaudCrypto secp256k1 ECIES password seal', () {
+    // Reference vector from jaisonerick/plaud-cli (eciesjs) — see crypto_test.go.
+    const refPriv =
+        'f9e7d2a02c6ceefd4590f8b79b6af668b13ff5140bcaea5e41db7cc2a4827351';
+    const refPub =
+        '03565039cd9ca53ca784f7d692fa133cf89d3924325cce282f822305a46a8e3660';
+    const refPlain = '{"pass":"s3nha-de-teste!","time":1786000000}';
+    const refEnvelope =
+        'BEyG417VRylogNJPeoZ7GSC8OW91Td9bKvWAyphMSQX2kzj4qQ4HAp+1i6I3neCqpXuGITk2L/pnWQla8D0GvuyaNl36aIHr4rUn/gkaFgfGvnwX65owGkpaf1RZr2PhVjHIC63o0pW5DnBVVSJ8dFL79MUw4WDZYNbpYbE4CESgPPWoAx7jtqCgmJGq';
+
+    test('decrypts the eciesjs reference envelope', () {
+      expect(PlaudCrypto.decryptPasswordSecp256k1(refPriv, refEnvelope), refPlain);
+    });
+
+    test('encrypt/decrypt round-trips against the reference key', () {
+      final sealed = PlaudCrypto.encryptPasswordSecp256k1(refPub, 's3nha-de-teste!');
+      final plain = PlaudCrypto.decryptPasswordSecp256k1(refPriv, sealed);
+      expect(plain, contains('"pass":"s3nha-de-teste!"'));
+      expect(plain, contains('"time":'));
+    });
+
+    test('envelopes are never deterministic (ephemeral key per call)', () {
+      final a = PlaudCrypto.encryptPasswordSecp256k1(refPub, 'same');
+      final b = PlaudCrypto.encryptPasswordSecp256k1(refPub, 'same');
+      expect(a, isNot(b));
+    });
+  });
+
+  group('PlaudCrypto Fernet', () {
+    test('decrypts a known Fernet token', () {
+      const key = '8rRmMCskL3NaUiGr-UsmEEeI8NKH-ZfeGbpRGqSLpuI=';
+      const token =
+          'gAAAAABq6faFOWmt4j5QB8N1icLmLN28oQv5SezCXvkb4J-7raO_lyVPTIhKf5iZ9ps2xThKa2ksQO5Jfs8OuMFjbkek0sjnyslP25Q5sg4ksB8RS_d5tgM=';
+      expect(PlaudCrypto.fernetDecrypt(token, key), '{"status":0,"msg":"success"}');
+    });
+  });
 }

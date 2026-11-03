@@ -107,17 +107,35 @@ class PlaudCloudApi {
   final String baseUrl;
   final Dio _dio;
 
+  /// Fernet key the API uses to encrypt responses when `X-Encrypt-Response: 1`
+  /// is sent (standard Fernet, 32 bytes). Extracted from the app (class `wng.b`,
+  /// 7 joined parts) and verified live.
+  static const String _fernetKey =
+      '8rRmMCskL3NaUiGr-UsmEEeI8NKH-ZfeGbpRGqSLpuI=';
+
   /// Sign in with email + password.
   ///
-  /// The current backend's password login is `POST /auth/access-token` (an
-  /// OAuth2-style password grant) with body `{username, password}`. The older
-  /// `/login/login-email` endpoint no longer exists (returns 404). The response
-  /// is **flat** (no `data` wrapper) and reports errors via `status != 0` while
-  /// still answering HTTP 200, e.g. `status: -2` = wrong account or password.
+  /// `POST /auth/access-token` (form-encoded) with the password sealed with the
+  /// server's secp256k1 public key from `/config/security`
+  /// (`password_encrypted=true`, `client_id=web`) — no plaintext password. The
+  /// response is **flat** (no `data` wrapper) and reports errors via `status`
+  /// while still answering HTTP 200 (`status:-2` = wrong password).
   Future<PlaudSession> login(String email, String password) async {
+    final sec = await fetchSecurityConfig();
+    final pub = sec['pass_pub_key'];
+    if (pub is! String || pub.isEmpty) {
+      throw PlaudApiException('Plaud returned no pass_pub_key to seal the password');
+    }
+    final sealed = PlaudCrypto.encryptPasswordSecp256k1(pub, password);
     final resp = await _dio.post<dynamic>(
       '/auth/access-token',
-      data: <String, dynamic>{'username': email, 'password': password},
+      data: <String, dynamic>{
+        'username': email,
+        'password': sealed,
+        'client_id': 'web',
+        'password_encrypted': 'true',
+      },
+      options: Options(contentType: Headers.formUrlEncodedContentType),
     );
     final d = _data(resp.data);
     final status = _int(d['status']);
@@ -140,12 +158,7 @@ class PlaudCloudApi {
     return _data(resp.data);
   }
 
-  /// Sign in. The live `/config/security` reports `pass_algorithm: secp256k1`
-  /// (an EC key, not RSA), so the old RSA `passwordEncrypted` wrapping is not
-  /// applicable to the current `/auth/access-token` endpoint, which accepts the
-  /// plaintext `password` over TLS. Kept as a separate entry point so the
-  /// secure-encryption path can be re-added once the exact secp256k1 scheme is
-  /// implemented.
+  /// Sign in (password sealed with secp256k1 ECIES inside `login`).
   Future<PlaudSession> loginSecure(String email, String password) =>
       login(email, password);
 
@@ -164,52 +177,65 @@ class PlaudCloudApi {
     );
   }
 
-  /// Sign one or more device serials (`/device/sn-sign`). The live endpoint
-  /// requires `X-Encrypt-Response: 1` and returns a Fernet-encrypted body;
-  /// Fernet decryption is not implemented yet, so this returns a best-effort
-  /// (likely empty) map. The key material is currently obtained from the app's
-  /// own secure storage instead (see findings/plaud_credentials.json).
+  /// Sign one or more device serials (`/device/sn-sign`). Requires
+  /// `X-Encrypt-Response: 1`; the body is a Fernet token, decrypted here.
+  /// Returns `data.signature[serial]` = base64 of the 256-byte SN signature.
   Future<Map<String, dynamic>> snSign(String accessToken, List<String> serials) async {
     final resp = await _dio.post<dynamic>(
       '/device/sn-sign',
       data: <String, dynamic>{'sns': serials},
-      options: Options(headers: _auth(accessToken)),
+      options: Options(
+        headers: _auth(accessToken),
+        responseType: ResponseType.plain,
+      ),
     );
-    return _data(resp.data);
+    return _fernetData(resp.data);
   }
 
-  /// Fetch the escrowed e2ee key pair (`/e2ee/gen_key`; `/e2ee/get_key` is gone).
-  /// Same Fernet caveat as `snSign`.
+  /// Fetch the escrowed e2ee RSA key pair (`/e2ee/gen_key`; `/e2ee/get_key` is
+  /// gone). Fernet-decrypted. Returns `data.private_key_base64` /
+  /// `public_key_base64` (base64 of RSA-2048 PEM text).
   Future<Map<String, dynamic>> e2eeGetKey(String accessToken) async {
     final resp = await _dio.post<dynamic>(
       '/e2ee/gen_key',
-      options: Options(headers: _auth(accessToken)),
+      options: Options(
+        headers: _auth(accessToken),
+        responseType: ResponseType.plain,
+      ),
     );
-    return _data(resp.data);
+    return _fernetData(resp.data);
   }
 
-  /// High-level flow: sign in and fetch the key material for `serial`. The
-  /// response shapes are only partially mapped, so this extracts best-effort and
-  /// is meant to be tightened once the live capture nails the exact fields.
+  /// High-level flow: sign in, then fetch the SN signature + e2ee key for
+  /// `serial`. Response shapes are verified against the live API.
   Future<PlaudCloudKeys> loadExistingKey(String email, String password, String serial) async {
     final session = await loginSecure(email, password);
     final sign = await snSign(session.accessToken, <String>[serial]);
+
+    String? snSignature;
+    Uint8List? deviceKey;
+    final sigMap = sign['signature'];
+    if (sigMap is Map) {
+      final v = sigMap[serial];
+      if (v is String && v.isNotEmpty) {
+        snSignature = v;
+        final bytes = _tryB64(v);
+        if (bytes != null && bytes.length == 256) deviceKey = bytes;
+      }
+    }
+
     Map<String, dynamic> e2ee = const {};
     try {
       e2ee = await e2eeGetKey(session.accessToken);
     } catch (_) {/* key may already be inside sn-sign for some accounts */}
-    final merged = <String, dynamic>{...sign, ...e2ee};
+
     return PlaudCloudKeys(
-      userId: session.userId.isNotEmpty
-          ? session.userId
-          : _firstStr(merged, const ['user_id', 'userId', 'member_id', 'memberId']),
-      privateKeyPem: _keyPem(merged,
-          const ['private_key', 'private_key_base64', 'user_key'],
-          isPrivate: true),
-      publicKeyPem:
-          _keyPem(merged, const ['public_key', 'public_key_base64']),
-      snSignature: _firstStr(merged, const ['sn_signature', 'snSignature', 'signature']),
-      devicePublicKey: _deviceKey(merged),
+      userId: session.userId.isNotEmpty ? session.userId : null,
+      privateKeyPem:
+          _b64Pem(e2ee, const ['private_key_base64', 'private_key', 'user_key']),
+      publicKeyPem: _b64Pem(e2ee, const ['public_key_base64', 'public_key']),
+      snSignature: snSignature,
+      devicePublicKey: deviceKey,
     );
   }
 
@@ -217,6 +243,38 @@ class PlaudCloudApi {
         'Authorization': 'Bearer $token',
         'X-Encrypt-Response': '1',
       };
+
+  /// Fernet-decrypt a plain response body and parse it as the `{status,data}`
+  /// envelope (merging `data` over the top level via `_data`).
+  Map<String, dynamic> _fernetData(dynamic body) {
+    final token = body is String ? body : body.toString();
+    final json = PlaudCrypto.fernetDecrypt(token, _fernetKey);
+    return _data(jsonDecode(json));
+  }
+
+  /// Decode a field that is base64(PEM text) back to the PEM string.
+  static String? _b64Pem(Map<String, dynamic> m, List<String> keys) {
+    for (final k in keys) {
+      final v = m[k];
+      if (v is String && v.isNotEmpty) {
+        if (v.contains('BEGIN')) return v;
+        final bytes = _tryB64(v.replaceAll(RegExp(r'\s'), ''));
+        if (bytes != null) {
+          final s = utf8.decode(bytes);
+          if (s.contains('BEGIN')) return s;
+        }
+      }
+    }
+    return null;
+  }
+
+  static Uint8List? _tryB64(String s) {
+    try {
+      return base64Decode(s);
+    } catch (_) {
+      return null;
+    }
+  }
 
   /// Best-effort flatten of the standard `{code,msg,data:{...}}` envelope: merge
   /// `data` over the top-level map so callers can read fields either way.
