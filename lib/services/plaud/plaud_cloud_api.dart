@@ -11,7 +11,8 @@ import '../ble/plaud_crypto.dart';
 class _LoggingInterceptor extends Interceptor {
   @override
   void onRequest(RequestOptions options, RequestInterceptorHandler handler) {
-    developer.log('REQ ${options.method} ${options.uri}', name: 'PlaudApi');
+    developer.log('REQ ${options.method} ${options.uri} body=${_trim(options.data)}',
+        name: 'PlaudApi');
     handler.next(options);
   }
 
@@ -19,7 +20,7 @@ class _LoggingInterceptor extends Interceptor {
   void onResponse(Response response, ResponseInterceptorHandler handler) {
     developer.log(
         'RES ${response.requestOptions.method} ${response.requestOptions.uri} '
-        '-> ${response.statusCode}',
+        '-> ${response.statusCode} body=${_trim(response.data)}',
         name: 'PlaudApi');
     handler.next(response);
   }
@@ -28,9 +29,14 @@ class _LoggingInterceptor extends Interceptor {
   void onError(DioException err, ErrorInterceptorHandler handler) {
     developer.log(
         'ERR ${err.requestOptions.method} ${err.requestOptions.uri} '
-        '-> ${err.response?.statusCode} ${err.type.name}',
+        '-> ${err.response?.statusCode} ${err.type.name} body=${_trim(err.response?.data)}',
         name: 'PlaudApi');
     handler.next(err);
+  }
+
+  static String _trim(dynamic v) {
+    final s = (v == null) ? '' : v.toString();
+    return s.length > 300 ? '${s.substring(0, 300)}…' : s;
   }
 }
 
@@ -104,7 +110,7 @@ class PlaudCloudApi {
     } else {
       body['password'] = password;
     }
-    final resp = await _dio.post<dynamic>('/login/login-email', data: body);
+    final resp = await _dio.post<dynamic>('/auth/otp-login', data: body);
     final d = _data(resp.data);
     return PlaudSession(
       accessToken: _str(d['access_token']),
