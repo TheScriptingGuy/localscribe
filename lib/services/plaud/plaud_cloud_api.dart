@@ -56,13 +56,24 @@ class PlaudSession {
   final String refreshToken;
   final String tokenType;
   final int expiresIn;
+  final String userId;
 
   PlaudSession({
     required this.accessToken,
     required this.refreshToken,
     this.tokenType = 'bearer',
     this.expiresIn = 0,
+    this.userId = '',
   });
+}
+
+/// The Plaud API reports errors in the response body (`status`/`code` != 0)
+/// while still returning HTTP 200, so this surfaces those as a real exception.
+class PlaudApiException implements Exception {
+  PlaudApiException(this.message);
+  final String message;
+  @override
+  String toString() => message;
 }
 
 /// Key material extracted from the cloud for one already-bound recorder.
@@ -96,51 +107,47 @@ class PlaudCloudApi {
   final String baseUrl;
   final Dio _dio;
 
-  /// Sign in with email + password. When `passwordEncrypted` is provided (the
-  /// password RSA-wrapped with the server key from `/config/security`), the
-  /// plaintext `password` is **not** sent; otherwise it falls back to plaintext
-  /// exactly as the app's own fallback path does.
-  Future<PlaudSession> login(
-    String email,
-    String password, {
-    String? passwordEncrypted,
-  }) async {
-    final body = <String, dynamic>{'email': email};
-    if (passwordEncrypted != null && passwordEncrypted.isNotEmpty) {
-      body['password_encrypted'] = passwordEncrypted;
-    } else {
-      body['password'] = password;
-    }
-    final resp = await _dio.post<dynamic>('/login/login-email', data: body);
+  /// Sign in with email + password.
+  ///
+  /// The current backend's password login is `POST /auth/access-token` (an
+  /// OAuth2-style password grant) with body `{username, password}`. The older
+  /// `/login/login-email` endpoint no longer exists (returns 404). The response
+  /// is **flat** (no `data` wrapper) and reports errors via `status != 0` while
+  /// still answering HTTP 200, e.g. `status: -2` = wrong account or password.
+  Future<PlaudSession> login(String email, String password) async {
+    final resp = await _dio.post<dynamic>(
+      '/auth/access-token',
+      data: <String, dynamic>{'username': email, 'password': password},
+    );
     final d = _data(resp.data);
+    final status = _int(d['status']);
+    if (status != 0) {
+      throw PlaudApiException(
+          'Plaud login failed (status $status): ${_str(d['msg'])}');
+    }
     return PlaudSession(
       accessToken: _str(d['access_token']),
       refreshToken: _str(d['refresh_token']),
       tokenType: _str(d['token_type'], fallback: 'bearer'),
       expiresIn: _int(d['expires_in']),
+      userId: _str(d['uid']),
     );
   }
 
-  /// Server security config: `pass_pub_key` (RSA public key) + `pass_algorithm`.
+  /// Server security config: `pass_pub_key` + `pass_algorithm`.
   Future<Map<String, dynamic>> fetchSecurityConfig() async {
     final resp = await _dio.get<dynamic>('/config/security');
     return _data(resp.data);
   }
 
-  /// Sign in, encrypting the password with the server public key from
-  /// `/config/security` (matching the app). Falls back to plaintext only if the
-  /// security config is unavailable.
-  Future<PlaudSession> loginSecure(String email, String password) async {
-    try {
-      final sec = await fetchSecurityConfig();
-      final pub = sec['pass_pub_key'];
-      if (pub is String && pub.isNotEmpty) {
-        final enc = PlaudCrypto.encryptPasswordWithPublicKey(pub, password);
-        return login(email, password, passwordEncrypted: enc);
-      }
-    } catch (_) {/* fall through to plaintext fallback */}
-    return login(email, password);
-  }
+  /// Sign in. The live `/config/security` reports `pass_algorithm: secp256k1`
+  /// (an EC key, not RSA), so the old RSA `passwordEncrypted` wrapping is not
+  /// applicable to the current `/auth/access-token` endpoint, which accepts the
+  /// plaintext `password` over TLS. Kept as a separate entry point so the
+  /// secure-encryption path can be re-added once the exact secp256k1 scheme is
+  /// implemented.
+  Future<PlaudSession> loginSecure(String email, String password) =>
+      login(email, password);
 
   /// Refresh the access token.
   Future<PlaudSession> refresh(String refreshToken) async {
@@ -157,10 +164,11 @@ class PlaudCloudApi {
     );
   }
 
-  /// Sign one or more device serials (`/device/sn-sign`). Returns the parsed
-  /// response `data` map, which carries the per-device SN signature and the
-  /// escrowed key material (fields like `user_key`, `public_key_base64`,
-  /// `private_key_base64`, `enc_private_key`, `sn_signature`).
+  /// Sign one or more device serials (`/device/sn-sign`). The live endpoint
+  /// requires `X-Encrypt-Response: 1` and returns a Fernet-encrypted body;
+  /// Fernet decryption is not implemented yet, so this returns a best-effort
+  /// (likely empty) map. The key material is currently obtained from the app's
+  /// own secure storage instead (see findings/plaud_credentials.json).
   Future<Map<String, dynamic>> snSign(String accessToken, List<String> serials) async {
     final resp = await _dio.post<dynamic>(
       '/device/sn-sign',
@@ -170,11 +178,11 @@ class PlaudCloudApi {
     return _data(resp.data);
   }
 
-  /// Fetch the escrowed e2ee key pair (`/e2ee/get_key`). Returns the parsed
-  /// `data` map (the RSA public/private key material).
+  /// Fetch the escrowed e2ee key pair (`/e2ee/gen_key`; `/e2ee/get_key` is gone).
+  /// Same Fernet caveat as `snSign`.
   Future<Map<String, dynamic>> e2eeGetKey(String accessToken) async {
     final resp = await _dio.post<dynamic>(
-      '/e2ee/get_key',
+      '/e2ee/gen_key',
       options: Options(headers: _auth(accessToken)),
     );
     return _data(resp.data);
@@ -192,7 +200,9 @@ class PlaudCloudApi {
     } catch (_) {/* key may already be inside sn-sign for some accounts */}
     final merged = <String, dynamic>{...sign, ...e2ee};
     return PlaudCloudKeys(
-      userId: _firstStr(merged, const ['user_id', 'userId', 'member_id', 'memberId']),
+      userId: session.userId.isNotEmpty
+          ? session.userId
+          : _firstStr(merged, const ['user_id', 'userId', 'member_id', 'memberId']),
       privateKeyPem: _keyPem(merged,
           const ['private_key', 'private_key_base64', 'user_key'],
           isPrivate: true),
@@ -203,7 +213,10 @@ class PlaudCloudApi {
     );
   }
 
-  Map<String, String> _auth(String token) => {'Authorization': 'Bearer $token'};
+  Map<String, String> _auth(String token) => {
+        'Authorization': 'Bearer $token',
+        'X-Encrypt-Response': '1',
+      };
 
   /// Best-effort flatten of the standard `{code,msg,data:{...}}` envelope: merge
   /// `data` over the top-level map so callers can read fields either way.
