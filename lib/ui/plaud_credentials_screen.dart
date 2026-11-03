@@ -156,7 +156,8 @@ class _PlaudCredentialsScreenState extends State<PlaudCredentialsScreen> {
       // Persist to external files so the error can be read via adb even though
       // release builds can't write to logcat.
       try {
-        final dir = await getExternalFilesDir(null);
+        final dirs = await getExternalStorageDirectories();
+        final dir = (dirs != null && dirs.isNotEmpty) ? dirs.first : null;
         if (dir != null) {
           await File('${dir.path}/plaud_error.txt').writeAsString(msg);
         }
