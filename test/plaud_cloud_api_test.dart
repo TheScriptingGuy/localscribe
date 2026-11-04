@@ -77,12 +77,13 @@ void main() {
     expect(loginReq.method, 'POST');
     expect(loginReq.contentType, contains('application/x-www-form-urlencoded'));
 
-    final data = loginReq.data as Map<String, dynamic>;
-    expect(data['username'], 'a@b.c');
-    expect(data['client_id'], 'web');
-    expect(data['password_encrypted'], 'true');
-    // The sealed password is an ECIES envelope: 65B ephemeral pub + nonce/tag/ct.
-    final sealed = (data['password'] as String);
+    final body = loginReq.data as String;
+    expect(body, contains('username='));
+    expect(body, contains('&client_id=web'));
+    expect(body, contains('&password_encrypted=true'));
+    final m = RegExp(r'password=([^&]+)').firstMatch(body);
+    expect(m, isNotNull);
+    final sealed = Uri.decodeQueryComponent(m!.group(1)!);
     expect(base64Decode(sealed).length, greaterThan(65));
 
     expect(session.accessToken, 'AT');

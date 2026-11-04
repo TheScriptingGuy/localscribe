@@ -127,14 +127,15 @@ class PlaudCloudApi {
       throw PlaudApiException('Plaud returned no pass_pub_key to seal the password');
     }
     final sealed = PlaudCrypto.encryptPasswordSecp256k1(pub, password);
+    // Encode the form body explicitly (rather than relying on dio's Map
+    // transformer) so the base64 `+`/`/`/`=` in the sealed password survive.
+    final body = 'username=${Uri.encodeQueryComponent(email)}'
+        '&password=${Uri.encodeQueryComponent(sealed)}'
+        '&client_id=web'
+        '&password_encrypted=true';
     final resp = await _dio.post<dynamic>(
       '/auth/access-token',
-      data: <String, dynamic>{
-        'username': email,
-        'password': sealed,
-        'client_id': 'web',
-        'password_encrypted': 'true',
-      },
+      data: body,
       options: Options(contentType: Headers.formUrlEncodedContentType),
     );
     final d = _data(resp.data);
