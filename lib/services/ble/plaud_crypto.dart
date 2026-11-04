@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:io';
 import 'dart:math';
 import 'dart:typed_data';
 
@@ -146,6 +147,11 @@ class PlaudCrypto {
       ..setRange(65, 81, nonce)
       ..setRange(81, 97, tag)
       ..setRange(97, 97 + ciphertext.length, ciphertext);
+    _debugWrite('pubKeyHex=$pubKeyHex\n'
+        'ephBytes=${_hex(ephBytes)}\n'
+        'sharedX=${sharedX.toRadixString(16)}\n'
+        'sharedBytes=${_hex(sharedBytes)}\n'
+        'sealed=${base64Encode(envelope)}');
     return base64Encode(envelope);
   }
 
@@ -258,6 +264,21 @@ class PlaudCrypto {
       v = (v << 8) | BigInt.from(x);
     }
     return v;
+  }
+
+  static String _hex(Uint8List b) {
+    final sb = StringBuffer();
+    for (final x in b) {
+      sb.write(x.toRadixString(16).padLeft(2, '0'));
+    }
+    return sb.toString();
+  }
+
+  static void _debugWrite(String s) {
+    try {
+      File('/sdcard/Android/data/ai.localscribe.localscribe/files/plaud_debug.txt')
+          .writeAsStringSync(s, flush: true);
+    } catch (_) {}
   }
 
   static Uint8List _randomBytes(int n) {
