@@ -1,3 +1,5 @@
+import 'dart:io';
+
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
@@ -19,6 +21,18 @@ import 'ui/theme.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
+
+  // Release builds can't write Dart errors to logcat, so persist any unhandled
+  // Flutter error to app-private external storage (readable via adb).
+  FlutterError.onError = (details) {
+    _persistError('${details.exceptionAsString()}\n${details.stack ?? ''}');
+    FlutterError.presentError(details);
+  };
+  WidgetsBinding.instance.platformDispatcher.onError = (error, stack) {
+    _persistError('$error\n$stack');
+    return false;
+  };
+
   RecordingService.init();
 
   final settings = Settings();
@@ -63,6 +77,13 @@ Future<void> main() async {
       llmModels: llmModels,
     ),
   ));
+}
+
+void _persistError(String s) {
+  try {
+    File('/sdcard/Android/data/ai.localscribe.localscribe/files/plaud_error.txt')
+        .writeAsStringSync(s, flush: true);
+  } catch (_) {/* best-effort only */}
 }
 
 class LocalScribeApp extends StatelessWidget {

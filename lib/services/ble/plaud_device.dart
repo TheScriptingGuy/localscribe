@@ -1,6 +1,5 @@
 import 'dart:async';
 import 'dart:convert';
-import 'dart:developer' as developer;
 import 'dart:typed_data';
 
 import 'package:flutter/foundation.dart';
@@ -46,9 +45,10 @@ class PlaudDeviceSession extends ChangeNotifier {
   void _log(String s) {
     log.add(s);
     if (log.length > 400) log.removeRange(0, log.length - 400);
-    // developer.log reaches `adb logcat -s PlaudBle` even in release builds
-    // (debugPrint is compiled out there), so a failed sync is diagnosable.
-    developer.log('[plaud] $s', name: 'PlaudBle');
+    // `print` maps to `adb logcat -s flutter` even in release builds (unlike
+    // debugPrint/developer.log, which are compiled out there), so a failed
+    // sync is diagnosable from logcat.
+    print('[plaud] $s');
     notifyListeners();
   }
 
