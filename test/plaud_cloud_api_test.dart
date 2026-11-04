@@ -145,21 +145,21 @@ void main() {
     expect(out.devicePublicKey, hasLength(256));
   });
 
-  test('listDevices() parses data_devices[].key from /device-app/device/list',
-      () async {
+  test('listDevices() parses data_devices (direct sn and key-wrapped) from '
+      '/device-app/device/list', () async {
     final adapter = _FakeAdapter((o) async {
       return {
         'status': 0,
         'msg': 'success',
         'data_devices': [
+          // Live response shape: entries carry `sn` directly (no `key`).
           {
-            'key': {
-              'sn': '88831804767178688B',
-              'name': 'Plaud Note',
-              'model': '888',
-              'version_number': 131592,
-            }
+            'sn': '88831804767178688B',
+            'name': 'Plaud Note',
+            'model': '888',
+            'version_number': 131592,
           },
+          // Older app-log shape: entry wrapped in `key`.
           {
             'key': {
               'sn': '88831797810177288B',

@@ -66,6 +66,7 @@ class _PlaudDevicesScreenState extends State<PlaudDevicesScreen> {
     });
     try {
       final acc = await PlaudCloudApi().loadAccount(email, password);
+      if (!mounted) return;
       final pem = acc.privateKeyPem;
       if (pem == null || pem.isEmpty) {
         throw StateError(
