@@ -93,6 +93,56 @@ class PlaudCloudKeys {
   });
 }
 
+/// One recorder bound to the account, as returned by `/device-app/device/list`.
+class PlaudAccountDevice {
+  final String sn;
+  final String name;
+  final String model;
+  final int versionNumber;
+
+  PlaudAccountDevice({
+    required this.sn,
+    required this.name,
+    this.model = '',
+    this.versionNumber = 0,
+  });
+
+  /// First three digits of the serial identify the model (`888` = Note,
+  /// `881` = Note Pro, `882` = NotePin S, `860` = Plaud One).
+  String get modelLabel {
+    switch (sn.length >= 3 ? sn.substring(0, 3) : '') {
+      case '881':
+        return 'Note Pro';
+      case '882':
+        return 'NotePin S';
+      case '880':
+        return 'NotePin';
+      case '860':
+        return 'Plaud One';
+      default:
+        return 'Plaud Note';
+    }
+  }
+}
+
+/// The full account payload for the "sign in & pair all" flow: the shared e2ee
+/// RSA key plus every bound recorder and its per-serial 256-byte SN signature.
+class PlaudCloudAccount {
+  final String? userId;
+  final String? privateKeyPem;
+  final String? publicKeyPem;
+  final List<PlaudAccountDevice> devices;
+  final Map<String, Uint8List> deviceKeys; // serial -> 256-byte SN signature
+
+  PlaudCloudAccount({
+    this.userId,
+    this.privateKeyPem,
+    this.publicKeyPem,
+    this.devices = const [],
+    this.deviceKeys = const {},
+  });
+}
+
 class PlaudCloudApi {
   PlaudCloudApi({String? baseUrl, Dio? dio})
       : baseUrl = baseUrl ?? 'https://api-euc1.plaud.ai',
@@ -207,6 +257,93 @@ class PlaudCloudApi {
     return _fernetData(resp.data);
   }
 
+  /// List every recorder bound to the account. The Plaud app uses
+  /// `GET /device-app/device/list`; the web API exposes the same data at
+  /// `GET /device/list` (returns `data_devices` without the `key` wrapper).
+  /// Both are tried so a user-token from `/auth/access-token` works either way.
+  /// Response is `{data_devices:[{key:{sn,name,model,version_number,…}}]}`.
+  Future<List<PlaudAccountDevice>> listDevices(String accessToken) async {
+    Object? lastErr;
+    for (final path in const ['/device-app/device/list', '/device/list']) {
+      try {
+        final resp = await _dio.get<dynamic>(
+          path,
+          options: Options(
+            headers: _auth(accessToken),
+            responseType: ResponseType.plain,
+          ),
+        );
+        final d = _fernetOrJson(resp.data);
+        final status = _int(d['status']);
+        if (status != 0) {
+          throw PlaudApiException(
+              'Plaud device list failed (status $status): ${_str(d['msg'])}');
+        }
+        final list = d['data_devices'];
+        if (list is! List) {
+          throw PlaudApiException('Plaud device list: missing data_devices');
+        }
+        final out = <PlaudAccountDevice>[];
+        for (final e in list) {
+          if (e is! Map) continue;
+          final m = Map<String, dynamic>.from(e);
+          final key = m['key'];
+          final v = (key is Map) ? Map<String, dynamic>.from(key) : m;
+          final sn = _str(v['sn']);
+          if (sn.isEmpty) continue;
+          out.add(PlaudAccountDevice(
+            sn: sn,
+            name: _str(v['name'], fallback: 'Plaud Note'),
+            model: _str(v['model']),
+            versionNumber: _int(v['version_number']),
+          ));
+        }
+        return out;
+      } catch (e) {
+        lastErr = e;
+      }
+    }
+    throw PlaudApiException('Plaud device list failed: $lastErr');
+  }
+
+  /// High-level "pair all" flow: sign in, fetch the shared e2ee key, list every
+  /// bound recorder, and sign each serial so its 256-byte SN signature is
+  /// available for the BLE handshake. Devices whose signature cannot be fetched
+  /// are still listed (just without key material).
+  Future<PlaudCloudAccount> loadAccount(String email, String password) async {
+    final session = await loginSecure(email, password);
+
+    Map<String, dynamic> e2ee = const {};
+    try {
+      e2ee = await e2eeGetKey(session.accessToken);
+    } catch (_) {/* key may already be inside sn-sign for some accounts */}
+
+    final devices = await listDevices(session.accessToken);
+    final deviceKeys = <String, Uint8List>{};
+    for (final dev in devices) {
+      try {
+        final sign = await snSign(session.accessToken, <String>[dev.sn]);
+        final sigMap = sign['signature'];
+        if (sigMap is Map) {
+          final v = sigMap[dev.sn];
+          if (v is String && v.isNotEmpty) {
+            final bytes = _tryB64(v);
+            if (bytes != null && bytes.length == 256) deviceKeys[dev.sn] = bytes;
+          }
+        }
+      } catch (_) {/* skip devices whose signature is not available */}
+    }
+
+    return PlaudCloudAccount(
+      userId: session.userId.isNotEmpty ? session.userId : null,
+      privateKeyPem:
+          _b64Pem(e2ee, const ['private_key_base64', 'private_key', 'user_key']),
+      publicKeyPem: _b64Pem(e2ee, const ['public_key_base64', 'public_key']),
+      devices: devices,
+      deviceKeys: deviceKeys,
+    );
+  }
+
   /// High-level flow: sign in, then fetch the SN signature + e2ee key for
   /// `serial`. Response shapes are verified against the live API.
   Future<PlaudCloudKeys> loadExistingKey(String email, String password, String serial) async {
@@ -251,6 +388,17 @@ class PlaudCloudApi {
     final token = body is String ? body : body.toString();
     final json = PlaudCrypto.fernetDecrypt(token, _fernetKey);
     return _data(jsonDecode(json));
+  }
+
+  /// Decrypt a Fernet token if the body looks like one, else parse as JSON.
+  Map<String, dynamic> _fernetOrJson(dynamic body) {
+    final s = (body is String ? body : body.toString()).trim();
+    if (s.startsWith('gAAAA')) return _fernetData(s);
+    try {
+      return _data(jsonDecode(s));
+    } catch (_) {
+      return const <String, dynamic>{};
+    }
   }
 
   /// Decode a field that is base64(PEM text) back to the PEM string.

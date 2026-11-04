@@ -144,4 +144,97 @@ void main() {
     expect(out.snSignature, isNotNull);
     expect(out.devicePublicKey, hasLength(256));
   });
+
+  test('listDevices() parses data_devices[].key from /device-app/device/list',
+      () async {
+    final adapter = _FakeAdapter((o) async {
+      return {
+        'status': 0,
+        'msg': 'success',
+        'data_devices': [
+          {
+            'key': {
+              'sn': '88831804767178688B',
+              'name': 'Plaud Note',
+              'model': '888',
+              'version_number': 131592,
+            }
+          },
+          {
+            'key': {
+              'sn': '88831797810177288B',
+              'name': 'Plaud Note',
+              'model': '888',
+              'version_number': 100,
+            }
+          },
+        ],
+      };
+    });
+    final api = PlaudCloudApi(
+        dio: Dio(BaseOptions(baseUrl: 'https://example.com'))
+          ..httpClientAdapter = adapter);
+
+    final devices = await api.listDevices('AT');
+
+    final req = adapter.seen.single;
+    expect(req.path, '/device-app/device/list');
+    expect(req.method, 'GET');
+    expect(req.headers['X-Encrypt-Response'], '1');
+    expect(devices, hasLength(2));
+    expect(devices.first.sn, '88831804767178688B');
+    expect(devices.first.modelLabel, 'Plaud Note');
+  });
+
+  test('loadAccount() lists devices and signs every serial', () async {
+    final adapter = _FakeAdapter((o) async {
+      switch (o.path) {
+        case '/config/security':
+          return {
+            'status': 0,
+            'data': {'pass_pub_key': _refPub, 'pass_algorithm': 'secp256k1'},
+          };
+        case '/auth/access-token':
+          return {
+            'status': 0,
+            'access_token': 'AT',
+            'refresh_token': 'RT',
+            'uid': 'user-123',
+          };
+        case '/device-app/device/list':
+          return {
+            'status': 0,
+            'msg': 'success',
+            'data_devices': [
+              {
+                'key': {
+                  'sn': '88831804767178688B',
+                  'name': 'Plaud Note',
+                  'model': '888',
+                  'version_number': 131592,
+                }
+              },
+            ],
+          };
+        case '/device/sn-sign':
+          return _snToken;
+        case '/e2ee/gen_key':
+          return _gkToken;
+        default:
+          return {'status': 0};
+      }
+    });
+    final api = PlaudCloudApi(
+        dio: Dio(BaseOptions(baseUrl: 'https://example.com'))
+          ..httpClientAdapter = adapter);
+
+    final acc = await api.loadAccount('a@b.c', 'hunter2');
+
+    expect(acc.userId, 'user-123');
+    expect(acc.privateKeyPem, contains('BEGIN PRIVATE KEY'));
+    expect(acc.devices, hasLength(1));
+    expect(acc.devices.single.sn, '88831804767178688B');
+    expect(acc.deviceKeys, contains('88831804767178688B'));
+    expect(acc.deviceKeys['88831804767178688B'], hasLength(256));
+  });
 }

@@ -11,7 +11,7 @@ import 'services/notes/note_jobs.dart';
 import 'services/templates/template_repository.dart';
 import 'services/transcription/transcription_jobs.dart';
 import 'settings/settings.dart';
-import 'ui/plaud_import_screen.dart';
+import 'ui/plaud_devices_screen.dart';
 import 'ui/record_screen.dart';
 import 'ui/recordings_screen.dart';
 import 'ui/templates_screen.dart';
@@ -150,8 +150,8 @@ class _RootShellState extends State<RootShell> {
               ),
               _SheetAction(
                 icon: Icons.bluetooth_outlined,
-                title: 'Plaud device',
-                subtitle: 'Sync recordings from your recorder over Bluetooth',
+                title: 'Plaud devices',
+                subtitle: 'Pair and sync recordings from your Plaud recorders',
                 onTap: () => Navigator.pop(ctx, 'plaud'),
               ),
             ],
@@ -168,7 +168,7 @@ class _RootShellState extends State<RootShell> {
         await importAudio(context);
       case 'plaud':
         Navigator.of(context)
-            .push(MaterialPageRoute(builder: (_) => const PlaudImportScreen()));
+            .push(MaterialPageRoute(builder: (_) => const PlaudDevicesScreen()));
     }
   }
 

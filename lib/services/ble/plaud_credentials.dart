@@ -82,6 +82,15 @@ class PlaudCredentials extends ChangeNotifier {
     return null;
   }
 
+  /// Replace the whole device list in one save (used by the "pair all" flow so
+  /// a single sign-in reflects every recorder on the account).
+  Future<void> replaceDevices(List<PlaudDeviceCred> next) async {
+    devices
+      ..clear()
+      ..addAll(next);
+    await _save();
+  }
+
   Future<void> clear() async {
     userId = null;
     rsaPrivateKeyPem = null;
