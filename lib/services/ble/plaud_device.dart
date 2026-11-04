@@ -62,6 +62,10 @@ class PlaudDeviceSession extends ChangeNotifier {
   /// [cred]; [dev] is the target recorder (its public key is presented).
   Future<void> sync(PlaudCredentials cred, PlaudDeviceCred dev) async {
     downloads.clear();
+    // Reset session state so a re-connect starts a fresh handshake (a previous
+    // session's key/chunks otherwise cause "mac check failed" on the new one).
+    _keys = null;
+    _keyChunks.clear();
     try {
       final priv = PlaudCrypto.privateKeyFromPem(cred.rsaPrivateKeyPem!);
       final id = await _scan();
