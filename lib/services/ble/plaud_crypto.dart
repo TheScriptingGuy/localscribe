@@ -114,17 +114,21 @@ class PlaudCrypto {
       d = _bytesToBigInt(buf);
     } while (d == BigInt.zero || d >= domain.n);
     final ephPoint = domain.G * d;
-    final ephPriv = ECPrivateKey(d, domain);
 
-    // Don't use pointycastle's getEncoded() here: its field negation can leave
-    // a negative y, which encodes incorrectly. Rebuild the uncompressed point
-    // manually with a valid (principal-sqrt) y instead.
+    // Use the ACTUAL point coordinates (normalised into [0,p)) for both the
+    // ephemeral public key and the shared point. The server recomputes the
+    // shared point from the ephemeral key it receives and keeps its actual y,
+    // so a "principal square root" guess is wrong ~50% of the time — the source
+    // of the intermittent -101. This mirrors jaisonerick/plaud-cli
+    // internal/api/crypto.go (deriveSharedKey).
     final ephX = _modP(ephPoint!.x!.toBigInteger()!);
-    final ephBytes = _pointBytes(ephX, _secp256k1Y(ephX)); // 65 bytes
-    final agreement = ECDHBasicAgreement()..init(ephPriv);
-    final sharedX =
-        _modP(agreement.calculateAgreement(ECPublicKey(serverPoint, domain)));
-    final sharedBytes = _pointBytes(sharedX, _secp256k1Y(sharedX));
+    final ephY = _modP(ephPoint.y!.toBigInteger()!);
+    final ephBytes = _pointBytes(ephX, ephY); // 65 bytes
+
+    final sharedPoint = serverPoint * d;
+    final sharedX = _modP(sharedPoint!.x!.toBigInteger()!);
+    final sharedY = _modP(sharedPoint.y!.toBigInteger()!);
+    final sharedBytes = _pointBytes(sharedX, sharedY);
 
     final ikm = Uint8List.fromList([...ephBytes, ...sharedBytes]);
     final hkdf = HKDFKeyDerivator(SHA256Digest())
@@ -167,10 +171,10 @@ class PlaudCrypto {
 
     final ephPoint = domain.curve.decodePoint(ephBytes)!;
     final priv = ECPrivateKey(BigInt.parse(privKeyHex, radix: 16), domain);
-    final agreement = ECDHBasicAgreement()..init(priv);
-    final sharedX =
-        _modP(agreement.calculateAgreement(ECPublicKey(ephPoint, domain)));
-    final sharedBytes = _pointBytes(sharedX, _secp256k1Y(sharedX));
+    final sharedPoint = ephPoint * priv.d!;
+    final sharedX = _modP(sharedPoint!.x!.toBigInteger()!);
+    final sharedY = _modP(sharedPoint.y!.toBigInteger()!);
+    final sharedBytes = _pointBytes(sharedX, sharedY);
 
     final ikm = Uint8List.fromList([...ephBytes, ...sharedBytes]);
     final hkdf = HKDFKeyDerivator(SHA256Digest())
