@@ -216,11 +216,21 @@ class PlaudDeviceSession extends ChangeNotifier {
     // Collect control responses for a short window after each command.
     final fileIds = <int>{};
     final sub = _frames.stream.listen((f) {
-      if (f.isControl && f.op == 0x03 && f.content.length >= 12) {
-        // op 0x03 listing: file id at content[8:12]
+      if (f.isControl && (f.op == 0x03 || f.op == 0x04) && f.content.length >= 12) {
+        // listing/per-file-query: file id at content[8:12] (little-endian).
         final c = f.content;
         final fid = c[8] | (c[9] << 8) | (c[10] << 16) | (c[11] << 24);
         if (fid != 0) fileIds.add(fid);
+      }
+      // Also harvest any 4-byte little-endian value that looks like a unix
+      // timestamp (> 0x50000000) from any control payload, in case the listing
+      // uses a different opcode/layout.
+      for (var i = 0; i + 4 <= f.content.length; i++) {
+        final v = f.content[i] |
+            (f.content[i + 1] << 8) |
+            (f.content[i + 2] << 16) |
+            (f.content[i + 3] << 24);
+        if (v > 0x50000000) fileIds.add(v);
       }
     });
 
@@ -228,8 +238,23 @@ class PlaudDeviceSession extends ChangeNotifier {
     await _settle();
     await _write(cmds.deviceInfo());
     await _settle();
-    await _write(cmds.listNext());
-    await _settle(ms: 1500);
+    // Probe candidate "list recordings" commands: the phase-5 capture observed
+    // op 0x03 (next-file/list) and op 0x04 (per-file query), plus several
+    // device/sync-state opcodes. Sweep them and log every response so the real
+    // listing command is identifiable on the device.
+    for (final probe in <List<int>>[
+      [0x03],
+      [0x04, 0x00, 0x00, 0x00, 0x00],
+      [0x08],
+      [0x09],
+      [0x18],
+      [0x19],
+      [0x1b],
+    ]) {
+      await _write(cmds.raw(probe[0], probe.sublist(1)));
+      await _settle(ms: 500);
+    }
+    await _settle(ms: 1000);
 
     _log('discovered file ids: ${fileIds.map((e) => e.toRadixString(16)).toList()}');
     for (final fid in fileIds) {
@@ -275,7 +300,7 @@ class PlaudDeviceSession extends ChangeNotifier {
   }
 
   static String _hexHead(List<int> b) {
-    final n = b.length < 16 ? b.length : 16;
+    final n = b.length < 64 ? b.length : 64;
     final sb = StringBuffer();
     for (var i = 0; i < n; i++) {
       sb.write(b[i].toRadixString(16).padLeft(2, '0'));
