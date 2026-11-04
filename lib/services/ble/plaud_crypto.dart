@@ -114,12 +114,17 @@ class PlaudCrypto {
       }
       d = _bytesToBigInt(buf);
     } while (d == BigInt.zero || d >= domain.n);
-    final ephPub = ECPublicKey(domain.G * d, domain);
+    final ephPoint = domain.G * d;
     final ephPriv = ECPrivateKey(d, domain);
 
-    final ephBytes = ephPub.Q!.getEncoded(false); // 65 bytes uncompressed
+    // Don't use pointycastle's getEncoded() here: its field negation can leave
+    // a negative y, which encodes incorrectly. Rebuild the uncompressed point
+    // manually with a valid (principal-sqrt) y instead.
+    final ephX = _modP(ephPoint!.x!.toBigInteger()!);
+    final ephBytes = _pointBytes(ephX, _secp256k1Y(ephX)); // 65 bytes
     final agreement = ECDHBasicAgreement()..init(ephPriv);
-    final sharedX = agreement.calculateAgreement(ECPublicKey(serverPoint, domain));
+    final sharedX =
+        _modP(agreement.calculateAgreement(ECPublicKey(serverPoint, domain)));
     final sharedBytes = _pointBytes(sharedX, _secp256k1Y(sharedX));
 
     final ikm = Uint8List.fromList([...ephBytes, ...sharedBytes]);
@@ -169,7 +174,8 @@ class PlaudCrypto {
     final ephPoint = domain.curve.decodePoint(ephBytes)!;
     final priv = ECPrivateKey(BigInt.parse(privKeyHex, radix: 16), domain);
     final agreement = ECDHBasicAgreement()..init(priv);
-    final sharedX = agreement.calculateAgreement(ECPublicKey(ephPoint, domain));
+    final sharedX =
+        _modP(agreement.calculateAgreement(ECPublicKey(ephPoint, domain)));
     final sharedBytes = _pointBytes(sharedX, _secp256k1Y(sharedX));
 
     final ikm = Uint8List.fromList([...ephBytes, ...sharedBytes]);
@@ -229,6 +235,11 @@ class PlaudCrypto {
       throw ArgumentError('Invalid secp256k1 server public key');
     }
     return p;
+  }
+
+  static BigInt _modP(BigInt a) {
+    final p = _secp256k1P();
+    return ((a % p) + p) % p;
   }
 
   static BigInt _secp256k1P() => BigInt.parse(
