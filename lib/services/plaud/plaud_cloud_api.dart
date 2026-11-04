@@ -129,6 +129,7 @@ class PlaudAccountDevice {
 /// RSA key plus every bound recorder and its per-serial 256-byte SN signature.
 class PlaudCloudAccount {
   final String? userId;
+  final String? accessToken;
   final String? privateKeyPem;
   final String? publicKeyPem;
   final List<PlaudAccountDevice> devices;
@@ -136,10 +137,30 @@ class PlaudCloudAccount {
 
   PlaudCloudAccount({
     this.userId,
+    this.accessToken,
     this.privateKeyPem,
     this.publicKeyPem,
     this.devices = const [],
     this.deviceKeys = const {},
+  });
+}
+
+/// One recording in the account's cloud library (`/file/simple/web`).
+class PlaudCloudRecording {
+  final String id;
+  final String filename;
+  final int filesize;
+  final int durationMs;
+  final int startTimeMs;
+  final String serialNumber;
+
+  PlaudCloudRecording({
+    required this.id,
+    this.filename = '',
+    this.filesize = 0,
+    this.durationMs = 0,
+    this.startTimeMs = 0,
+    this.serialNumber = '',
   });
 }
 
@@ -306,6 +327,62 @@ class PlaudCloudApi {
     throw PlaudApiException('Plaud device list failed: $lastErr');
   }
 
+  /// List the account's cloud recordings (`GET /file/simple/web`). The audio is
+  /// already decrypted server-side (MP3), so no e2ee key is needed to play it.
+  Future<List<PlaudCloudRecording>> listRecordings(String accessToken,
+      {int skip = 0, int limit = 99999}) async {
+    final resp = await _dio.get<dynamic>(
+      '/file/simple/web?skip=$skip&limit=$limit&is_trash=0&sort_by=edit_time&is_desc=true',
+      options: Options(
+        headers: _auth(accessToken),
+        responseType: ResponseType.plain,
+      ),
+    );
+    final d = _fernetOrJson(resp.data);
+    final status = _int(d['status']);
+    if (status != 0) {
+      throw PlaudApiException(
+          'Plaud file list failed (status $status): ${_str(d['msg'])}');
+    }
+    final list = d['data_file_list'];
+    if (list is! List) return const [];
+    final out = <PlaudCloudRecording>[];
+    for (final e in list) {
+      if (e is! Map) continue;
+      final m = Map<String, dynamic>.from(e);
+      final id = _str(m['id']);
+      if (id.isEmpty) continue;
+      out.add(PlaudCloudRecording(
+        id: id,
+        filename: _str(m['filename']),
+        filesize: _int(m['filesize']),
+        durationMs: _int(m['duration']),
+        startTimeMs: _int(m['start_time']),
+        serialNumber: _str(m['serial_number']),
+      ));
+    }
+    return out;
+  }
+
+  /// Get a presigned download URL for one recording (`GET /file/temp-url/{id}`).
+  Future<String> getTempUrl(String accessToken, String fileId) async {
+    final resp = await _dio.get<dynamic>(
+      '/file/temp-url/$fileId?is_opus=1',
+      options: Options(
+        headers: _auth(accessToken),
+        responseType: ResponseType.plain,
+      ),
+    );
+    final d = _fernetOrJson(resp.data);
+    final status = _int(d['status']);
+    if (status != 0) {
+      throw PlaudApiException(
+          'Plaud temp-url failed (status $status): ${_str(d['msg'])}');
+    }
+    final url = _str(d['temp_url_opus']);
+    return url.isNotEmpty ? url : _str(d['temp_url']);
+  }
+
   /// High-level "pair all" flow: sign in, fetch the shared e2ee key, list every
   /// bound recorder, and sign each serial so its 256-byte SN signature is
   /// available for the BLE handshake. Devices whose signature cannot be fetched
@@ -336,6 +413,7 @@ class PlaudCloudApi {
 
     return PlaudCloudAccount(
       userId: session.userId.isNotEmpty ? session.userId : null,
+      accessToken: session.accessToken,
       privateKeyPem:
           _b64Pem(e2ee, const ['private_key_base64', 'private_key', 'user_key']),
       publicKeyPem: _b64Pem(e2ee, const ['public_key_base64', 'public_key']),

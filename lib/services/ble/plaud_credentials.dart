@@ -34,6 +34,7 @@ class PlaudDeviceCred {
 /// unwrap the per-session ChaCha key the device sends.
 class PlaudCredentials extends ChangeNotifier {
   String? userId;
+  String? accessToken;
   String? rsaPrivateKeyPem;
   final List<PlaudDeviceCred> devices = [];
 
@@ -49,6 +50,7 @@ class PlaudCredentials extends ChangeNotifier {
       try {
         final j = jsonDecode(await _file.readAsString()) as Map<String, dynamic>;
         userId = j['userId'];
+        accessToken = j['accessToken'];
         rsaPrivateKeyPem = j['rsaPrivateKeyPem'];
         devices
           ..clear()
@@ -59,9 +61,11 @@ class PlaudCredentials extends ChangeNotifier {
     notifyListeners();
   }
 
-  Future<void> setIdentity({required String userId, required String pem}) async {
+  Future<void> setIdentity(
+      {required String userId, required String pem, String? token}) async {
     this.userId = userId.trim();
     rsaPrivateKeyPem = pem.trim();
+    if (token != null) accessToken = token;
     await _save();
   }
 
@@ -93,6 +97,7 @@ class PlaudCredentials extends ChangeNotifier {
 
   Future<void> clear() async {
     userId = null;
+    accessToken = null;
     rsaPrivateKeyPem = null;
     devices.clear();
     if (await _file.exists()) await _file.delete();
@@ -104,6 +109,7 @@ class PlaudCredentials extends ChangeNotifier {
     await tmp.writeAsString(
         jsonEncode({
           'userId': userId,
+          'accessToken': accessToken,
           'rsaPrivateKeyPem': rsaPrivateKeyPem,
           'devices': devices.map((d) => d.toJson()).toList(),
         }),

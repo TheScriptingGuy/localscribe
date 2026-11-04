@@ -1,12 +1,18 @@
 import 'dart:async';
+import 'dart:io';
 import 'dart:typed_data';
 
+import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_reactive_ble/flutter_reactive_ble.dart';
+import 'package:path/path.dart' as p;
+import 'package:path_provider/path_provider.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:provider/provider.dart';
 
+import '../models/recording.dart';
 import '../services/ble/plaud_credentials.dart';
+import '../services/library/recording_store.dart';
 import '../services/plaud/plaud_cloud_api.dart';
 import 'plaud_import_screen.dart';
 import 'theme.dart';
@@ -73,7 +79,8 @@ class _PlaudDevicesScreenState extends State<PlaudDevicesScreen> {
             'No e2ee key returned by Plaud (account has no escrowed key yet?).');
       }
       final cred = context.read<PlaudCredentials>();
-      await cred.setIdentity(userId: acc.userId ?? '', pem: pem);
+      await cred.setIdentity(
+          userId: acc.userId ?? '', pem: pem, token: acc.accessToken);
       final devs = <PlaudDeviceCred>[];
       for (final d in acc.devices) {
         devs.add(PlaudDeviceCred(
@@ -131,6 +138,54 @@ class _PlaudDevicesScreenState extends State<PlaudDevicesScreen> {
     await _scanSub?.cancel();
     _scanSub = null;
     if (mounted) setState(() => _scanning = false);
+  }
+
+  Future<void> _syncCloud() async {
+    final cred = context.read<PlaudCredentials>();
+    final token = cred.accessToken;
+    if (token == null || token.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Sign in to Plaud first.')));
+      return;
+    }
+    setState(() {
+      _busy = true;
+      _error = null;
+    });
+    try {
+      final api = PlaudCloudApi();
+      final recs = await api.listRecordings(token);
+      if (!mounted) return;
+      final store = context.read<RecordingStore>();
+      final tmp = await getTemporaryDirectory();
+      final dio = Dio();
+      var saved = 0;
+      for (final r in recs) {
+        final url = await api.getTempUrl(token, r.id);
+        final resp = await dio.get<List<int>>(url,
+            options: Options(responseType: ResponseType.bytes));
+        final bytes = Uint8List.fromList(resp.data!);
+        final f = File(p.join(tmp.path, 'plaud_${r.id}.mp3'));
+        await f.writeAsBytes(bytes, flush: true);
+        await store.add(
+          f,
+          title: r.filename.isEmpty ? r.id : r.filename,
+          source: RecordingSource.plaud,
+          move: true,
+        );
+        saved++;
+      }
+      if (!mounted) return;
+      setState(() => _busy = false);
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text('Synced $saved recording(s) from Plaud cloud')));
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _busy = false;
+        _error = '$e';
+      });
+    }
   }
 
   /// Pull a device serial out of the manufacturer data. The Plaud advert
@@ -245,6 +300,16 @@ class _PlaudDevicesScreenState extends State<PlaudDevicesScreen> {
             )
           else
             ...cred.devices.map((d) => _deviceCard(d)),
+          const SizedBox(height: 16),
+          OutlinedButton.icon(
+            onPressed: _busy ? null : _syncCloud,
+            icon: const Icon(Icons.cloud_download_outlined),
+            label: Text(_busy ? 'Syncing…' : 'Sync recordings from Plaud cloud'),
+          ),
+          if (_error != null) ...[
+            const SizedBox(height: 12),
+            Text(_error!, style: const TextStyle(color: Palette.danger)),
+          ],
           const SizedBox(height: 24),
           const Divider(),
           const SizedBox(height: 8),
