@@ -27,6 +27,50 @@ void main() {
       expect(utf8.decode(pt), password);
     });
 
+    test('parses PKCS#8 (BEGIN PRIVATE KEY) and derives public exponent 65537',
+        () {
+      // Fresh throwaway RSA-2048 PKCS#8 key (not the user's).
+      const pkcs8 = '''-----BEGIN PRIVATE KEY-----
+MIIEvgIBADANBgkqhkiG9w0BAQEFAASCBKgwggSkAgEAAoIBAQDUDmHpffhWOavx
+tyeUasxwgYdnLrbT1qUfAWZ7PXWc6ADr/qeG264tycl79xZWAnvVXtndwyKw4ZKy
+ggugNmUZCRDchYGhOmcBiNHtWE9QH0Nrr6BkKQsw2s1Pay6C7fqRx0Ul/EOvaSrg
+etlbSGQPY9Xa4f4rLR0mR4sbQs075jFSypGZmys76n9z2F3QW+VtpiCV1RtdEnmf
+wa6r640Jv3H9Eyl6ObqVDWZ5Gjf1DFOghcK4Qv5PXUmKohpmMUsxCah3x3EPcdPD
+CzHYAT7uGraPGJL4G5gaI/XD4ttXoT0taOzHn6kmOQcERHtnvPlRac4mdpMmT7f8
+QUa7K+5zAgMBAAECggEAQBMKdc147MDnWhWwEXIFzRbubXiZiL/qS8iWCTYEZEFc
+CfL79s1JP4+h4GHEL3/3n/zVkuMEB/NY6rRNw/67pIlvPVrf1PI7LqUDXZaZ/Ik9
+y3uZWLpoJb5vXAh0WN6EoGjYVYZ4gzehW4vzQlhI17egZk90B+LNVIQ4naedMPQr
+xSntCEbMXolBr+L/pdTQ0Rd+ZrdIHVY53rrTDEubMLD5MbvwM6Q8n0YxGaxxJgI9
+F09hivU74GoBwELJU83MS+/klu9fNejSsjSfMLgfefpw6L7rqzb9FTCzhADCQ9QR
+NiRVl/9Keshb/RPGmT0vyi5pzKH/cZ6PqBMnvrVCoQKBgQD1N9sTVsxKlowzcInp
+Gzus46kP398iHDgidRb5qcCmh5GssulNrIr5XigfiUP7iZ3264erWUNrpijD/Kc5
+kI8BQ4ZUKuqM0xoXduWQCbVhzVHP4C68Xf8tw8mnJULYUNfokmN65lxHxDzgaZ8O
+Tzxs60nN3zRFu3i1tQaJ++ADEwKBgQDdYUJr7vLVfC3fnNU9PlwjfnWinBIh3TIT
+7jOezbzKDQa2Ejej7C+tzATB8FcqdrmRSH21ZqDn4NCj9P5ayvrcgUlhdnvkt4Rc
+RuGe+GQm/tMqyKRE6Xck8h71w+KuyesxqM0zM80k8erKul+sNVcOhiTp8fpToKhc
+wdZ6qa5zIQKBgQDIfX2Z5zqqtUI2AIpRU9nLtmuQthqKmgXvbkp1oCwKPAeH6tPD
+lRIfZrNpbWJu84p6ywGmwBnWlwj3jMfw0deKUfovMNOKhkLr8mMpDDcHmsaMLqAn
+lLbBZTWneliX4ilVVvMNFfFXIAQh+1l3aqNd7lXug9MKPIgqELMi+BOkjwKBgEeX
+jm1tRua3U/Z+t48ovY9U9CH0KwD8kZdUbykqC6Wj9MmotomydfDUi61UVjwLTROo
+x86ENAEI+TAsqJ0gC2SIAv0b3hEnMAzPd2N7nJfnzM6HOGh4v+kYy95azNINxpu2
+pTWryOnruix5fTspvM+bnhByCqxExm3I2d2tRhdBAoGBAM9kXZm5I5+iDOAdIBZW
+pYyHmaTNHE+uM2chrP7KXCsvT2s+W9yfSpggOUVml3v6bFdEgyGTAYaAixbTeWtX
+v2gy0vXUkw5Gy5Bjcxq+f3vkqdGfk1JKCIuK4n7oQqS76QyGUNnRBsvD+G2I70F0
+lD8rPC6LXPIridfz5UDxFiQy
+-----END PRIVATE KEY-----''';
+
+      final priv = PlaudCrypto.privateKeyFromPem(pkcs8);
+      final pubPem = PlaudCrypto.publicKeyPemFromPrivate(priv);
+      final pub = PlaudCrypto.publicKeyFromPem(pubPem);
+      expect(pub.publicExponent, BigInt.from(65537));
+
+      // The derived public key must actually encrypt for the private key.
+      const msg = 'hello pkcs8';
+      final ct = PlaudCrypto.rsaEncryptPkcs1(
+          pub, Uint8List.fromList(utf8.encode(msg)));
+      expect(utf8.decode(PlaudCrypto.rsaUnwrap(priv, ct)), msg);
+    });
+
     test('publicKeyFromAny accepts PEM and bare base64 (SPKI)', () {
       final keys = PlaudCrypto.generateKeyPair();
       final viaPem = PlaudCrypto.publicKeyFromAny(keys.publicPem);

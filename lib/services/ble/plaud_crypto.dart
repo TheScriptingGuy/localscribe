@@ -3,6 +3,7 @@ import 'dart:math';
 import 'dart:typed_data';
 
 import 'package:basic_utils/basic_utils.dart';
+import 'package:pointycastle/asn1.dart';
 import 'package:pointycastle/export.dart';
 
 /// Crypto for the Plaud BLE session, reverse-engineered and verified against a
@@ -26,13 +27,56 @@ class PlaudSessionKeys {
 }
 
 class PlaudCrypto {
-  /// Parse a PEM-encoded PKCS#8 (or PKCS#1) RSA private key.
-  static RSAPrivateKey privateKeyFromPem(String pem) =>
-      CryptoUtils.rsaPrivateKeyFromPem(pem);
+  /// Parse a PEM RSA private key, accepting both PKCS#1 (`BEGIN RSA PRIVATE
+  /// KEY`) and PKCS#8 (`BEGIN PRIVATE KEY`). basic_utils' `rsaPrivateKeyFromPem`
+  /// only accepts PKCS#1, but the Plaud cloud returns a PKCS#8 key, so unwrap
+  /// the outer OCTET STRING first.
+  static RSAPrivateKey privateKeyFromPem(String pem) {
+    final der = _pemToDer(pem);
+    return _rsaPrivateKeyFromPkcs1(_unwrapPkcs8(der));
+  }
 
   /// Parse a PEM public key (used to sanity-check an imported key pair).
   static RSAPublicKey publicKeyFromPem(String pem) =>
       CryptoUtils.rsaPublicKeyFromPem(pem);
+
+  /// Strip PEM armor and return the base64 body as DER.
+  static Uint8List _pemToDer(String pem) {
+    final body = pem
+        .replaceAll(RegExp(r'-----BEGIN [A-Z ]+-----'), '')
+        .replaceAll(RegExp(r'-----END [A-Z ]+-----'), '')
+        .replaceAll(RegExp(r'\s'), '');
+    return base64Decode(body);
+  }
+
+  /// If [der] is a PKCS#8 `PrivateKeyInfo`, return the inner PKCS#1
+  /// `RSAPrivateKey` DER; otherwise return [der] unchanged.
+  static Uint8List _unwrapPkcs8(Uint8List der) {
+    final outer = ASN1Parser(der).nextObject();
+    if (outer is ASN1Sequence) {
+      final e = outer.elements!;
+      // PKCS#8 PrivateKeyInfo: version, algorithmIdentifier, privateKey (OCTET STRING)
+      if (e.length >= 3 && e[2] is ASN1OctetString) {
+        return (e[2] as ASN1OctetString).octets!;
+      }
+    }
+    return der;
+  }
+
+  /// Parse a PKCS#1 `RSAPrivateKey` DER into a pointycastle [RSAPrivateKey].
+  static RSAPrivateKey _rsaPrivateKeyFromPkcs1(Uint8List der) {
+    final obj = ASN1Parser(der).nextObject();
+    if (obj is! ASN1Sequence) {
+      throw StateError('RSA private key: not an ASN.1 sequence');
+    }
+    final e = obj.elements!;
+    if (e.length < 9) {
+      throw StateError('RSA private key: expected >=9 fields, got ${e.length}');
+    }
+    BigInt intAt(int i) => (e[i] as ASN1Integer).integer!;
+    // RSAPrivateKey: version(0) n(1) e(2) d(3) p(4) q(5) dP(6) dQ(7) qInv(8)
+    return RSAPrivateKey(intAt(1), intAt(3), intAt(4), intAt(5));
+  }
 
   /// Generate a fresh RSA-2048 keypair. Returns (publicPem, privatePem).
   ///
@@ -53,7 +97,7 @@ class PlaudCrypto {
   /// sends the *public* key of the same keypair whose private key we unwrap with).
   static String publicKeyPemFromPrivate(RSAPrivateKey priv) =>
       CryptoUtils.encodeRSAPublicKeyToPem(
-          RSAPublicKey(priv.modulus!, priv.exponent ?? BigInt.from(65537)));
+          RSAPublicKey(priv.modulus!, priv.publicExponent ?? BigInt.from(65537)));
 
   /// RSA/ECB/PKCS1Padding decrypt (mode used by the device handshake).
   static Uint8List rsaUnwrap(RSAPrivateKey priv, Uint8List wrapped) {
