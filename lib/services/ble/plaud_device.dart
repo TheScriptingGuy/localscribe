@@ -141,8 +141,9 @@ class PlaudDeviceSession extends ChangeNotifier {
     _notifySub = _ble
         .subscribeToCharacteristic(_qc(PlaudProtocol.chNotify, id))
         .listen(_onNotify, onError: (e) => _log('notify error $e'));
-    // small settle so the CCCD write lands before we start writing
-    await Future<void>.delayed(const Duration(milliseconds: 300));
+    // The recorder disconnects (~280 ms) if its device key is not presented
+    // promptly after the notify CCCD lands, so keep this settle very short.
+    await Future<void>.delayed(const Duration(milliseconds: 30));
   }
 
   void _onNotify(List<int> data) {
@@ -179,7 +180,7 @@ class PlaudDeviceSession extends ChangeNotifier {
     _set(PlaudStatus.handshaking, 'Handshaking…');
     for (final f in PlaudProtocol.keyWriteFrames(devicePubKey)) {
       await _write(f);
-      await Future<void>.delayed(const Duration(milliseconds: 60));
+      await Future<void>.delayed(const Duration(milliseconds: 20));
     }
     // `12 FE 05`: provision our RSA public key so the device wraps the session
     // key to US. This is what makes a self-generated (or imported) key "work"
@@ -188,7 +189,7 @@ class PlaudDeviceSession extends ChangeNotifier {
     final userBytes = Uint8List.fromList(utf8.encode(userPem));
     for (final f in PlaudProtocol.userKeyWriteFrames(userBytes)) {
       await _write(f);
-      await Future<void>.delayed(const Duration(milliseconds: 60));
+      await Future<void>.delayed(const Duration(milliseconds: 20));
     }
     // wait for the 3 wrapped-key chunks
     final deadline = DateTime.now().add(const Duration(seconds: 8));
