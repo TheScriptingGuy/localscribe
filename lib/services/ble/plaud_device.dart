@@ -258,6 +258,8 @@ class PlaudDeviceSession extends ChangeNotifier {
       [0x04, 0x00, 0x00, 0x00, 0x00],
       [0x04, 0xff, 0xff, 0xff, 0xff],
       [0x08],
+      [0x08, 0x00, 0x00, 0x00, 0x00],
+      [0x08, 0x00],
       [0x09],
       [0x18],
       [0x19],
@@ -265,6 +267,21 @@ class PlaudDeviceSession extends ChangeNotifier {
     ]) {
       await _sendCmd(cmds, probe[0], probe.sublist(1));
       await _settle(ms: 500);
+    }
+    // Probe per-file queries + downloads against plausible creation
+    // timestamps from the last ~15 minutes (the fresh recording's file id).
+    final nowSec = DateTime.now().millisecondsSinceEpoch ~/ 1000;
+    for (final ts in [nowSec - 900, nowSec - 600, nowSec - 300, nowSec]) {
+      final b = <int>[
+        ts & 0xff,
+        (ts >> 8) & 0xff,
+        (ts >> 16) & 0xff,
+        (ts >> 24) & 0xff,
+      ];
+      await _sendCmd(cmds, 0x04, b);
+      await _settle(ms: 500);
+      await _sendCmd(cmds, 0x1c, [...b, 0, 0, 0, 0, 0x80, 0x02, 0, 0]);
+      await _settle(ms: 800);
     }
     await _settle(ms: 1000);
 
