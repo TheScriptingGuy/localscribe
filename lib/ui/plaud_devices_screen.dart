@@ -155,6 +155,8 @@ class _PlaudDevicesScreenState extends State<PlaudDevicesScreen> {
     try {
       final api = PlaudCloudApi();
       final recs = await api.listRecordings(token);
+      // Newest first (start at the most recent recording).
+      recs.sort((a, b) => b.startTimeMs.compareTo(a.startTimeMs));
       if (!mounted) return;
       final store = context.read<RecordingStore>();
       final tmp = await getTemporaryDirectory();

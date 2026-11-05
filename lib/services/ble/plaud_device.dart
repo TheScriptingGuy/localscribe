@@ -232,15 +232,15 @@ class PlaudDeviceSession extends ChangeNotifier {
         final fid = c[8] | (c[9] << 8) | (c[10] << 16) | (c[11] << 24);
         if (fid != 0) fileIds.add(fid);
       }
-      // Also harvest any 4-byte little-endian value that looks like a unix
-      // timestamp (> 0x50000000) from any control payload, in case the listing
-      // uses a different opcode/layout.
+      // Harvest any 4-byte little-endian value in the 2026-2027 unix-timestamp
+      // range (real Plaud file ids look like 0x6ae8xxxx). This ignores ASCII
+      // ("PLAUD_NOTE") and 0xff padding that the old >0x50000000 sweep matched.
       for (var i = 0; i + 4 <= f.content.length; i++) {
         final v = f.content[i] |
             (f.content[i + 1] << 8) |
             (f.content[i + 2] << 16) |
             (f.content[i + 3] << 24);
-        if (v > 0x50000000) fileIds.add(v);
+        if (v >= 0x6AE00000 && v <= 0x6B500000) fileIds.add(v);
       }
     });
 
@@ -268,8 +268,10 @@ class PlaudDeviceSession extends ChangeNotifier {
     }
     await _settle(ms: 1000);
 
-    _log('discovered file ids: ${fileIds.map((e) => e.toRadixString(16)).toList()}');
-    for (final fid in fileIds) {
+    // Newest first (file ids are unix timestamps, so descending = latest).
+    final sortedIds = fileIds.toList()..sort((a, b) => b.compareTo(a));
+    _log('discovered file ids: ${sortedIds.map((e) => e.toRadixString(16)).toList()}');
+    for (final fid in sortedIds) {
       await _download(cmds, fid);
     }
     await sub.cancel();
