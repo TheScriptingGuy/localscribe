@@ -165,11 +165,12 @@ class PlaudDeviceSession extends ChangeNotifier {
       final f = PlaudFrame.parse(pt);
       if (f.isControl) {
         _log('IN ctrl seq=${f.seq} op=0x${f.op.toRadixString(16)} '
-            'st=${f.status} ${_hexHead(f.content)}');
+            'st=${f.status} content=${_hex(f.content)}');
       } else if (f.isData) {
-        // keep data logging terse
+        _log('IN data seq=${f.seq} fileId=0x${f.fileId.toRadixString(16)} '
+            'off=${f.offset} len=${f.dataLen} head=${_hexHead(f.data)}');
       } else {
-        _log('IN type=${f.type} ${_hexHead(pt)}');
+        _log('IN type=${f.type} ${_hex(pt)}');
       }
       _frames.add(f);
     } catch (e) {
@@ -179,6 +180,15 @@ class PlaudDeviceSession extends ChangeNotifier {
 
   Future<void> _write(List<int> bytes) =>
       _ble.writeCharacteristicWithoutResponse(_qc(PlaudProtocol.chWrite, _deviceId!), value: bytes);
+
+  /// Send an encrypted control command and log its plaintext (op/content) so the
+  /// outgoing sequence is visible in the sync log.
+  Future<void> _sendCmd(PlaudCommands cmds, int op, List<int> content,
+      {int status = 0}) async {
+    _log('OUT seq=${cmds.nextSeq} op=0x${op.toRadixString(16)} '
+        'st=$status content=${_hex(content)}');
+    await _write(cmds.raw(op, content));
+  }
 
   Future<void> _handshake(Uint8List devicePubKey, priv) async {
     _set(PlaudStatus.handshaking, 'Handshaking…');
@@ -234,24 +244,26 @@ class PlaudDeviceSession extends ChangeNotifier {
       }
     });
 
-    await _write(cmds.auth(userId));
+    await _sendCmd(cmds, 0x01, [0x02, 0x00, 0x00, ...userId.codeUnits]);
     await _settle();
-    await _write(cmds.deviceInfo());
+    await _sendCmd(cmds, 0x6c, const []);
     await _settle();
-    // Probe candidate "list recordings" commands: the phase-5 capture observed
-    // op 0x03 (next-file/list) and op 0x04 (per-file query), plus several
-    // device/sync-state opcodes. Sweep them and log every response so the real
-    // listing command is identifiable on the device.
+    // Probe candidate "list recordings" commands. op 0x03 (next-file/list) and
+    // op 0x04 (per-file query) are the phase-5 candidates; sweep several
+    // variants (empty + explicit zero + 0xffffffff sentinel) plus device/sync
+    // state opcodes, logging every response to identify the real listing cmd.
     for (final probe in <List<int>>[
       [0x03],
+      [0x03, 0x00, 0x00, 0x00, 0x00],
       [0x04, 0x00, 0x00, 0x00, 0x00],
+      [0x04, 0xff, 0xff, 0xff, 0xff],
       [0x08],
       [0x09],
       [0x18],
       [0x19],
       [0x1b],
     ]) {
-      await _write(cmds.raw(probe[0], probe.sublist(1)));
+      await _sendCmd(cmds, probe[0], probe.sublist(1));
       await _settle(ms: 500);
     }
     await _settle(ms: 1000);
@@ -304,6 +316,14 @@ class PlaudDeviceSession extends ChangeNotifier {
     final sb = StringBuffer();
     for (var i = 0; i < n; i++) {
       sb.write(b[i].toRadixString(16).padLeft(2, '0'));
+    }
+    return sb.toString();
+  }
+
+  static String _hex(List<int> b) {
+    final sb = StringBuffer();
+    for (final v in b) {
+      sb.write(v.toRadixString(16).padLeft(2, '0'));
     }
     return sb.toString();
   }
