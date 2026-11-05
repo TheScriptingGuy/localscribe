@@ -223,23 +223,19 @@ class PlaudDeviceSession extends ChangeNotifier {
     _set(PlaudStatus.syncing, 'Requesting recordings…');
     final cmds = PlaudCommands(_keys!);
 
-    // Collect control responses for a short window after each command.
+    // Collect list (op 0x03) responses: file id at content[8:12] (LE), and
+    // any timestamp-range value inside the list payload. Restrict to op 0x03
+    // so the per-file-query echoes of our own probes are not misread as files.
     final fileIds = <int>{};
     final sub = _frames.stream.listen((f) {
-      if (f.isControl && (f.op == 0x03 || f.op == 0x04) && f.content.length >= 12) {
-        // listing/per-file-query: file id at content[8:12] (little-endian).
-        final c = f.content;
+      if (!f.isControl || f.op != 0x03) return;
+      final c = f.content;
+      if (c.length >= 12) {
         final fid = c[8] | (c[9] << 8) | (c[10] << 16) | (c[11] << 24);
         if (fid != 0) fileIds.add(fid);
       }
-      // Harvest any 4-byte little-endian value in the 2026-2027 unix-timestamp
-      // range (real Plaud file ids look like 0x6ae8xxxx). This ignores ASCII
-      // ("PLAUD_NOTE") and 0xff padding that the old >0x50000000 sweep matched.
-      for (var i = 0; i + 4 <= f.content.length; i++) {
-        final v = f.content[i] |
-            (f.content[i + 1] << 8) |
-            (f.content[i + 2] << 16) |
-            (f.content[i + 3] << 24);
+      for (var i = 0; i + 4 <= c.length; i++) {
+        final v = c[i] | (c[i + 1] << 8) | (c[i + 2] << 16) | (c[i + 3] << 24);
         if (v >= 0x6AE00000 && v <= 0x6B500000) fileIds.add(v);
       }
     });
@@ -269,9 +265,9 @@ class PlaudDeviceSession extends ChangeNotifier {
       await _settle(ms: 500);
     }
     // Probe per-file queries + downloads against plausible creation
-    // timestamps from the last ~15 minutes (the fresh recording's file id).
+    // timestamps from the last ~60 minutes (the fresh recording's file id).
     final nowSec = DateTime.now().millisecondsSinceEpoch ~/ 1000;
-    for (final ts in [nowSec - 900, nowSec - 600, nowSec - 300, nowSec]) {
+    for (var ts = nowSec - 3600; ts <= nowSec; ts += 300) {
       final b = <int>[
         ts & 0xff,
         (ts >> 8) & 0xff,
@@ -279,9 +275,9 @@ class PlaudDeviceSession extends ChangeNotifier {
         (ts >> 24) & 0xff,
       ];
       await _sendCmd(cmds, 0x04, b);
-      await _settle(ms: 500);
+      await _settle(ms: 400);
       await _sendCmd(cmds, 0x1c, [...b, 0, 0, 0, 0, 0x80, 0x02, 0, 0]);
-      await _settle(ms: 800);
+      await _settle(ms: 600);
     }
     await _settle(ms: 1000);
 
