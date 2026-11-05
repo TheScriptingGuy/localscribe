@@ -244,6 +244,15 @@ class PlaudDeviceSession extends ChangeNotifier {
     await _settle();
     await _sendCmd(cmds, 0x6c, const []);
     await _settle();
+    // Set the sync cursor to the beginning: the real app sends
+    // op 0x04 = [fileid:4][0x01 0x00] before each op 0x03 list, so the
+    // recorder enumerates files after that cursor. fileid 0 = from the start.
+    await _sendCmd(cmds, 0x04, [0x00, 0x00, 0x00, 0x00, 0x01, 0x00]);
+    await _settle(ms: 400);
+    await _sendCmd(cmds, 0x03, const []);
+    await _settle(ms: 400);
+    await _sendCmd(cmds, 0x03, const []);
+    await _settle(ms: 400);
     // Probe candidate "list recordings" commands. op 0x03 (next-file/list) and
     // op 0x04 (per-file query) are the phase-5 candidates; sweep several
     // variants (empty + explicit zero + 0xffffffff sentinel) plus device/sync
@@ -251,8 +260,8 @@ class PlaudDeviceSession extends ChangeNotifier {
     for (final probe in <List<int>>[
       [0x03],
       [0x03, 0x00, 0x00, 0x00, 0x00],
-      [0x04, 0x00, 0x00, 0x00, 0x00],
-      [0x04, 0xff, 0xff, 0xff, 0xff],
+      [0x04, 0x00, 0x00, 0x00, 0x00, 0x01, 0x00],
+      [0x04, 0xff, 0xff, 0xff, 0xff, 0x01, 0x00],
       [0x08],
       [0x08, 0x00, 0x00, 0x00, 0x00],
       [0x08, 0x00],
@@ -265,16 +274,16 @@ class PlaudDeviceSession extends ChangeNotifier {
       await _settle(ms: 500);
     }
     // Probe per-file queries + downloads against plausible creation
-    // timestamps from the last ~60 minutes (the fresh recording's file id).
+    // timestamps from the last ~90 minutes (the fresh recording's file id).
     final nowSec = DateTime.now().millisecondsSinceEpoch ~/ 1000;
-    for (var ts = nowSec - 3600; ts <= nowSec; ts += 300) {
+    for (var ts = nowSec - 5400; ts <= nowSec; ts += 300) {
       final b = <int>[
         ts & 0xff,
         (ts >> 8) & 0xff,
         (ts >> 16) & 0xff,
         (ts >> 24) & 0xff,
       ];
-      await _sendCmd(cmds, 0x04, b);
+      await _sendCmd(cmds, 0x04, [...b, 0x01, 0x00]);
       await _settle(ms: 400);
       await _sendCmd(cmds, 0x1c, [...b, 0, 0, 0, 0, 0x80, 0x02, 0, 0]);
       await _settle(ms: 600);
@@ -293,20 +302,49 @@ class PlaudDeviceSession extends ChangeNotifier {
   Future<void> _download(PlaudCommands cmds, int fileId) async {
     _set(PlaudStatus.syncing, 'Downloading ${fileId.toRadixString(16)}…');
     final asm = PlaudFileAssembler(fileId);
-    final done = Completer<void>();
+    var totalSize = 0;
+    var blockDone = Completer<void>();
     final sub = _frames.stream.listen((f) {
       if (f.isData && f.fileId == fileId) {
         asm.add(f);
         progress = (asm.bytesReceived % 1000000) / 1000000;
         if (asm.bytesReceived % 8000 < 90) notifyListeners();
-      } else if (f.isControl && f.op == 0x1d && !done.isCompleted) {
-        done.complete(); // end-of-file
+      } else if (f.isControl && f.op == 0x16 && f.content.length >= 8) {
+        // op 0x16 reply: [fileid:4][size:4][0401]
+        final sz = f.content[4] |
+            (f.content[5] << 8) |
+            (f.content[6] << 16) |
+            (f.content[7] << 24);
+        if (sz > 0) totalSize = sz;
+        _log('file ${fileId.toRadixString(16)} size=$sz');
+      } else if (f.isControl && f.op == 0x1d) {
+        // end of this download block
+        if (!blockDone.isCompleted) blockDone.complete();
       }
     });
-    await _write(cmds.download(fileId, 0, 0x280));
-    await done.future.timeout(const Duration(seconds: 120), onTimeout: () {
-      _log('download ${fileId.toRadixString(16)} timed out at ${asm.bytesReceived}B');
-    });
+
+    // Query the total size first (op 0x16: [fileid:4][00]).
+    await _sendCmd(cmds, 0x16, [..._le32(fileId), 0x00]);
+    await _settle(ms: 400);
+
+    // Download in 0x280-byte (640) blocks until the whole file is assembled.
+    var offset = 0;
+    var rounds = 0;
+    while ((totalSize == 0 || offset < totalSize) && rounds < 20000) {
+      blockDone = Completer<void>();
+      await _sendCmd(
+          cmds, 0x1c, [..._le32(fileId), ..._le32(offset), ..._le32(0x280)]);
+      await blockDone.future
+          .timeout(const Duration(seconds: 20), onTimeout: () {});
+      final got = asm.bytesReceived;
+      if (got <= offset) {
+        _log('download ${fileId.toRadixString(16)} stalled at $offset');
+        break;
+      }
+      offset = got;
+      rounds++;
+    }
+
     await sub.cancel();
     final bytes = asm.assemble();
     if (bytes.isNotEmpty) {
@@ -315,6 +353,9 @@ class PlaudDeviceSession extends ChangeNotifier {
           'magic=${String.fromCharCodes(bytes.take(8))}');
     }
   }
+
+  static List<int> _le32(int v) =>
+      [v & 0xFF, (v >> 8) & 0xFF, (v >> 16) & 0xFF, (v >> 24) & 0xFF];
 
   Future<void> _settle({int ms = 600}) =>
       Future<void>.delayed(Duration(milliseconds: ms));
