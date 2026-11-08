@@ -267,59 +267,70 @@ class PlaudDeviceSession extends ChangeNotifier {
     // Seed from the file-list's reported size (op 0x1a) and never let op 0x16
     // overwrite it — op 0x16's own size field is unreliable (seen returning
     // both all-zero and a too-small nonzero value for files that are larger).
-    var totalSize = knownSize;
-    var blockDone = Completer<void>();
+    final totalSize = knownSize;
+    final done = Completer<void>();
+    Timer? idleTimer;
+    void bumpIdleTimer() {
+      idleTimer?.cancel();
+      // No new data for a while after at least one real frame means the
+      // device is done (it has no final "stream complete" signal beyond the
+      // per-call 0x1d below, which — unlike a real EOF — it also sends after
+      // only the sentinel with nothing new, so idle-timeout is the backstop).
+      idleTimer = Timer(const Duration(seconds: 15), () {
+        if (!done.isCompleted) done.complete();
+      });
+    }
+
     final sub = _frames.stream.listen((f) {
       if (f.isData && f.fileId == fileId) {
         // The device appends a trailer/sentinel data frame with
-        // offset=0xFFFFFFFF after each block (the official app's own SDK logs
-        // this as "EMPTY_PACKAGE, code: 1" and discards it). Treating it as
-        // real data corrupts bytesReceived with a bogus huge offset, which
-        // then wraps back to a small garbage value once truncated to 32 bits
-        // for the next request — so it must be filtered out here.
+        // offset=0xFFFFFFFF after real data (the official app's own SDK logs
+        // this as "EMPTY_PACKAGE, code: 1" and discards it); it must not be
+        // treated as real content.
         if (totalSize <= 0 || f.offset < totalSize) {
           asm.add(f);
           progress = (asm.bytesReceived % 1000000) / 1000000;
           if (asm.bytesReceived % 8000 < 90) notifyListeners();
+          bumpIdleTimer();
+          if (totalSize > 0 && asm.bytesReceived >= totalSize && !done.isCompleted) {
+            done.complete();
+          }
         }
       } else if (f.isControl && f.op == 0x16 && f.content.length >= 8) {
         // op 0x16's reply is not a trustworthy size: observed returning both
         // all-zero and a small bogus nonzero value (512) for files that are
-        // actually much larger. totalSize is already seeded from the
-        // file-list's reported size above and must not be overwritten here —
-        // this is purely diagnostic logging now.
+        // actually much larger. totalSize is seeded from the file-list above
+        // and must not be overwritten here — this is diagnostic logging only.
         final sz = f.content[4] |
             (f.content[5] << 8) |
             (f.content[6] << 16) |
             (f.content[7] << 24);
         _log('file ${fileId.toRadixString(16)} op0x16 size=$sz (ignored, using known size=$totalSize)');
-      } else if (f.isControl && f.op == 0x1d) {
-        // end of this download block
-        if (!blockDone.isCompleted) blockDone.complete();
+      } else if (f.isControl && f.op == 0x1d && f.content.length >= 4) {
+        final eofFileId = f.content[0] |
+            (f.content[1] << 8) |
+            (f.content[2] << 16) |
+            (f.content[3] << 24);
+        if (eofFileId == fileId) bumpIdleTimer();
       }
     });
 
-    // Query the total size first (op 0x16: [fileid:4][00]).
+    // Query the total size first (op 0x16: [fileid:4][00]) — kept for parity
+    // with the official app's traffic; its reply is not used (see above).
     await _sendCmd(cmds, 0x16, [..._le32(fileId), 0x00]);
     await _settle(ms: 400);
 
-    // Download in 0x280-byte (640) blocks until the whole file is assembled.
-    var offset = 0;
-    var rounds = 0;
-    while ((totalSize == 0 || offset < totalSize) && rounds < 20000) {
-      blockDone = Completer<void>();
-      await _sendCmd(
-          cmds, 0x1c, [..._le32(fileId), ..._le32(offset), ..._le32(0x280)]);
-      await blockDone.future
-          .timeout(const Duration(seconds: 20), onTimeout: () {});
-      final got = asm.bytesReceived;
-      if (got <= offset) {
-        _log('download ${fileId.toRadixString(16)} stalled at $offset');
-        break;
-      }
-      offset = got;
-      rounds++;
-    }
+    // Request the WHOLE file in one call — the device doesn't support
+    // resuming a chunked read at a nonzero offset (a second op 0x1c at
+    // offset>0 after a small block reliably returned nothing but the
+    // sentinel+0x1d). The official app always requests the full known size
+    // in one go (findings/decoded_live_capture.txt) and drains however many
+    // data notifications follow until done.
+    bumpIdleTimer();
+    await _sendCmd(cmds, 0x1c,
+        [..._le32(fileId), ..._le32(0), ..._le32(totalSize > 0 ? totalSize : 0x7FFFFFFF)]);
+    await done.future.timeout(const Duration(minutes: 10), onTimeout: () {});
+    idleTimer?.cancel();
 
     await sub.cancel();
     final bytes = asm.assemble();
