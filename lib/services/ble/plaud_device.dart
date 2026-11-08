@@ -264,8 +264,9 @@ class PlaudDeviceSession extends ChangeNotifier {
   Future<void> _download(PlaudCommands cmds, int fileId, int knownSize) async {
     _set(PlaudStatus.syncing, 'Downloading ${fileId.toRadixString(16)}…');
     final asm = PlaudFileAssembler(fileId);
-    // Seed from the file-list's reported size (op 0x1a), not op 0x16 — which
-    // we've seen reply with an all-zero size for a file that downloads fine.
+    // Seed from the file-list's reported size (op 0x1a) and never let op 0x16
+    // overwrite it — op 0x16's own size field is unreliable (seen returning
+    // both all-zero and a too-small nonzero value for files that are larger).
     var totalSize = knownSize;
     var blockDone = Completer<void>();
     final sub = _frames.stream.listen((f) {
@@ -282,13 +283,16 @@ class PlaudDeviceSession extends ChangeNotifier {
           if (asm.bytesReceived % 8000 < 90) notifyListeners();
         }
       } else if (f.isControl && f.op == 0x16 && f.content.length >= 8) {
-        // op 0x16 reply: [fileid:4][size:4][0401]
+        // op 0x16's reply is not a trustworthy size: observed returning both
+        // all-zero and a small bogus nonzero value (512) for files that are
+        // actually much larger. totalSize is already seeded from the
+        // file-list's reported size above and must not be overwritten here —
+        // this is purely diagnostic logging now.
         final sz = f.content[4] |
             (f.content[5] << 8) |
             (f.content[6] << 16) |
             (f.content[7] << 24);
-        if (sz > 0) totalSize = sz;
-        _log('file ${fileId.toRadixString(16)} size=$sz');
+        _log('file ${fileId.toRadixString(16)} op0x16 size=$sz (ignored, using known size=$totalSize)');
       } else if (f.isControl && f.op == 0x1d) {
         // end of this download block
         if (!blockDone.isCompleted) blockDone.complete();
