@@ -257,20 +257,30 @@ class PlaudDeviceSession extends ChangeNotifier {
     // Newest first (file ids are unix timestamps, so descending = latest).
     final sorted = entries.toList()..sort((a, b) => b.fileId.compareTo(a.fileId));
     for (final e in sorted) {
-      await _download(cmds, e.fileId);
+      await _download(cmds, e.fileId, e.size);
     }
   }
 
-  Future<void> _download(PlaudCommands cmds, int fileId) async {
+  Future<void> _download(PlaudCommands cmds, int fileId, int knownSize) async {
     _set(PlaudStatus.syncing, 'Downloading ${fileId.toRadixString(16)}…');
     final asm = PlaudFileAssembler(fileId);
-    var totalSize = 0;
+    // Seed from the file-list's reported size (op 0x1a), not op 0x16 — which
+    // we've seen reply with an all-zero size for a file that downloads fine.
+    var totalSize = knownSize;
     var blockDone = Completer<void>();
     final sub = _frames.stream.listen((f) {
       if (f.isData && f.fileId == fileId) {
-        asm.add(f);
-        progress = (asm.bytesReceived % 1000000) / 1000000;
-        if (asm.bytesReceived % 8000 < 90) notifyListeners();
+        // The device appends a trailer/sentinel data frame with
+        // offset=0xFFFFFFFF after each block (the official app's own SDK logs
+        // this as "EMPTY_PACKAGE, code: 1" and discards it). Treating it as
+        // real data corrupts bytesReceived with a bogus huge offset, which
+        // then wraps back to a small garbage value once truncated to 32 bits
+        // for the next request — so it must be filtered out here.
+        if (totalSize <= 0 || f.offset < totalSize) {
+          asm.add(f);
+          progress = (asm.bytesReceived % 1000000) / 1000000;
+          if (asm.bytesReceived % 8000 < 90) notifyListeners();
+        }
       } else if (f.isControl && f.op == 0x16 && f.content.length >= 8) {
         // op 0x16 reply: [fileid:4][size:4][0401]
         final sz = f.content[4] |
