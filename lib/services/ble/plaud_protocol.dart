@@ -20,6 +20,8 @@ class PlaudProtocol {
   static const deviceName = 'PLAUD_NOTE';
 
   // handshake
+  // Device key is presented with `20 FE 03 <seq>` (the first-connect/enroll
+  // variant captured live; `10 FE 03` is the reconnect variant — both work).
   static List<Uint8List> keyWriteFrames(Uint8List devicePublicKey256) {
     assert(devicePublicKey256.length == 256);
     final sizes = [100, 100, 56];
@@ -28,10 +30,34 @@ class PlaudProtocol {
     for (var seq = 0; seq < 3; seq++) {
       final n = sizes[seq];
       final b = BytesBuilder()
-        ..add([0x10, 0xFE, 0x03, seq])
+        ..add([0x20, 0xFE, 0x03, seq])
         ..add(Uint8List.sublistView(devicePublicKey256, off, off + n));
       frames.add(b.toBytes());
       off += n;
+    }
+    return frames;
+  }
+
+  /// `12 FE 05 <seq>` + the user's RSA public key PEM (100-byte chunks).
+  ///
+  /// This is the enrollment/provisioning write: it tells the recorder which
+  /// user public key to wrap session (and at-rest content) keys to. Verified
+  /// against a fresh key in `findings/plaud-fresh-enroll-verified.md` — no cloud
+  /// needed, the device accepts whatever key is presented here.
+  static List<Uint8List> userKeyWriteFrames(List<int> userPublicKeyPem) {
+    final frames = <Uint8List>[];
+    var off = 0;
+    var seq = 0;
+    while (off < userPublicKeyPem.length) {
+      final n = (off + 100 < userPublicKeyPem.length)
+          ? 100
+          : userPublicKeyPem.length - off;
+      final b = BytesBuilder()
+        ..add([0x12, 0xFE, 0x05, seq])
+        ..add(userPublicKeyPem.sublist(off, off + n));
+      frames.add(b.toBytes());
+      off += n;
+      seq++;
     }
     return frames;
   }
@@ -110,8 +136,13 @@ class PlaudCommands {
   /// op 0x6c — device info (name).
   Uint8List deviceInfo() => _control(0x6c, const []);
 
-  /// op 0x03 — request next file / listing.
-  Uint8List listNext() => _control(0x03, const []);
+  /// op 0x1a — list pending files. Content = `[echo:4][count:4 LE]` +
+  /// `count` × `[fileId:4][size:4 LE][flags:2]` records. Verified against a
+  /// live capture of the real app (`findings/decoded_live_capture.txt`):
+  /// `op 0x03` always echoes back an empty/"no file" shape regardless of
+  /// what's actually queued — it is NOT the list opcode, despite earlier
+  /// notes assuming so. Use the top-level [parseFileList] on the response.
+  Uint8List listFiles() => _control(0x1a, List<int>.filled(9, 0));
 
   /// op 0x1c — download: [fileId:4][offset:4][blockSize:4].
   Uint8List download(int fileId, int offset, int blockSize) => _control(
@@ -124,6 +155,33 @@ class PlaudCommands {
 
   static List<int> _le32(int v) =>
       [v & 0xFF, (v >> 8) & 0xFF, (v >> 16) & 0xFF, (v >> 24) & 0xFF];
+}
+
+/// One entry from an `op 0x1a` file-list response.
+class PlaudFileEntry {
+  final int fileId;
+  final int size;
+  final int flags;
+  PlaudFileEntry(this.fileId, this.size, this.flags);
+}
+
+/// Parses an `op 0x1a` response content into its file records.
+List<PlaudFileEntry> parseFileList(Uint8List content) {
+  final entries = <PlaudFileEntry>[];
+  if (content.length < 8) return entries;
+  final count = content.buffer
+      .asByteData(content.offsetInBytes)
+      .getUint32(4, Endian.little);
+  var off = 8;
+  for (var i = 0; i < count && off + 10 <= content.length; i++) {
+    final bd = content.buffer.asByteData(content.offsetInBytes + off);
+    final fileId = bd.getUint32(0, Endian.little);
+    final size = bd.getUint32(4, Endian.little);
+    final flags = bd.getUint16(8, Endian.little);
+    entries.add(PlaudFileEntry(fileId, size, flags));
+    off += 10;
+  }
+  return entries;
 }
 
 /// Collects type-0x02 data frames for one file id and reassembles the file

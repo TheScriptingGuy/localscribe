@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:typed_data';
 
 import 'package:flutter/foundation.dart';
@@ -44,7 +45,10 @@ class PlaudDeviceSession extends ChangeNotifier {
   void _log(String s) {
     log.add(s);
     if (log.length > 400) log.removeRange(0, log.length - 400);
-    if (kDebugMode) debugPrint('[plaud] $s');
+    // `print` maps to `adb logcat -s flutter` even in release builds (unlike
+    // debugPrint/developer.log, which are compiled out there), so a failed
+    // sync is diagnosable from logcat.
+    print('[plaud] $s');
     notifyListeners();
   }
 
@@ -58,6 +62,10 @@ class PlaudDeviceSession extends ChangeNotifier {
   /// [cred]; [dev] is the target recorder (its public key is presented).
   Future<void> sync(PlaudCredentials cred, PlaudDeviceCred dev) async {
     downloads.clear();
+    // Reset session state so a re-connect starts a fresh handshake (a previous
+    // session's key/chunks otherwise cause "mac check failed" on the new one).
+    _keys = null;
+    _keyChunks.clear();
     try {
       final priv = PlaudCrypto.privateKeyFromPem(cred.rsaPrivateKeyPem!);
       final id = await _scan();
@@ -137,8 +145,9 @@ class PlaudDeviceSession extends ChangeNotifier {
     _notifySub = _ble
         .subscribeToCharacteristic(_qc(PlaudProtocol.chNotify, id))
         .listen(_onNotify, onError: (e) => _log('notify error $e'));
-    // small settle so the CCCD write lands before we start writing
-    await Future<void>.delayed(const Duration(milliseconds: 300));
+    // The recorder disconnects (~280 ms) if its device key is not presented
+    // promptly after the notify CCCD lands, so keep this settle very short.
+    await Future<void>.delayed(const Duration(milliseconds: 30));
   }
 
   void _onNotify(List<int> data) {
@@ -156,11 +165,12 @@ class PlaudDeviceSession extends ChangeNotifier {
       final f = PlaudFrame.parse(pt);
       if (f.isControl) {
         _log('IN ctrl seq=${f.seq} op=0x${f.op.toRadixString(16)} '
-            'st=${f.status} ${_hexHead(f.content)}');
+            'st=${f.status} content=${_hex(f.content)}');
       } else if (f.isData) {
-        // keep data logging terse
+        _log('IN data seq=${f.seq} fileId=0x${f.fileId.toRadixString(16)} '
+            'off=${f.offset} len=${f.dataLen} head=${_hexHead(f.data)}');
       } else {
-        _log('IN type=${f.type} ${_hexHead(pt)}');
+        _log('IN type=${f.type} ${_hex(pt)}');
       }
       _frames.add(f);
     } catch (e) {
@@ -171,11 +181,29 @@ class PlaudDeviceSession extends ChangeNotifier {
   Future<void> _write(List<int> bytes) =>
       _ble.writeCharacteristicWithoutResponse(_qc(PlaudProtocol.chWrite, _deviceId!), value: bytes);
 
+  /// Send an encrypted control command and log its plaintext (op/content) so the
+  /// outgoing sequence is visible in the sync log.
+  Future<void> _sendCmd(PlaudCommands cmds, int op, List<int> content,
+      {int status = 0}) async {
+    _log('OUT seq=${cmds.nextSeq} op=0x${op.toRadixString(16)} '
+        'st=$status content=${_hex(content)}');
+    await _write(cmds.raw(op, content));
+  }
+
   Future<void> _handshake(Uint8List devicePubKey, priv) async {
     _set(PlaudStatus.handshaking, 'Handshaking…');
     for (final f in PlaudProtocol.keyWriteFrames(devicePubKey)) {
       await _write(f);
-      await Future<void>.delayed(const Duration(milliseconds: 60));
+      await Future<void>.delayed(const Duration(milliseconds: 20));
+    }
+    // `12 FE 05`: provision our RSA public key so the device wraps the session
+    // key to US. This is what makes a self-generated (or imported) key "work"
+    // — the recorder accepts whatever user key is written here, no cloud.
+    final userPem = PlaudCrypto.publicKeyPemFromPrivate(priv);
+    final userBytes = Uint8List.fromList(utf8.encode(userPem));
+    for (final f in PlaudProtocol.userKeyWriteFrames(userBytes)) {
+      await _write(f);
+      await Future<void>.delayed(const Duration(milliseconds: 20));
     }
     // wait for the 3 wrapped-key chunks
     final deadline = DateTime.now().add(const Duration(seconds: 8));
@@ -195,48 +223,90 @@ class PlaudDeviceSession extends ChangeNotifier {
     _set(PlaudStatus.syncing, 'Requesting recordings…');
     final cmds = PlaudCommands(_keys!);
 
-    // Collect control responses for a short window after each command.
-    final fileIds = <int>{};
-    final sub = _frames.stream.listen((f) {
-      if (f.isControl && f.op == 0x03 && f.content.length >= 12) {
-        // op 0x03 listing: file id at content[8:12]
-        final c = f.content;
-        final fid = c[8] | (c[9] << 8) | (c[10] << 16) | (c[11] << 24);
-        if (fid != 0) fileIds.add(fid);
+    await _sendCmd(cmds, 0x01, [0x02, 0x00, 0x00, ...userId.codeUnits]);
+    await _settle();
+    await _sendCmd(cmds, 0x6c, const []);
+    await _settle();
+
+    // op 0x1a = list pending files, verified against a live capture of the
+    // real app (findings/decoded_live_capture.txt): content =
+    // [echo:4][count:4 LE] + count x [fileId:4][size:4 LE][flags:2].
+    // (op 0x03 — the earlier guess for "list" — always echoes an empty/
+    // "no file" shape regardless of what's actually queued; it is not this.)
+    final listCompleter = Completer<Uint8List>();
+    final listSub = _frames.stream.listen((f) {
+      if (f.isControl && f.op == 0x1a && !listCompleter.isCompleted) {
+        listCompleter.complete(f.content);
       }
     });
-
-    await _write(cmds.auth(userId));
-    await _settle();
-    await _write(cmds.deviceInfo());
-    await _settle();
-    await _write(cmds.listNext());
-    await _settle(ms: 1500);
-
-    _log('discovered file ids: ${fileIds.map((e) => e.toRadixString(16)).toList()}');
-    for (final fid in fileIds) {
-      await _download(cmds, fid);
+    await _sendCmd(cmds, 0x1a, List<int>.filled(9, 0));
+    Uint8List listContent;
+    try {
+      listContent = await listCompleter.future.timeout(
+        const Duration(seconds: 8),
+        onTimeout: () =>
+            throw TimeoutException('no file-list response (op 0x1a)'),
+      );
+    } finally {
+      await listSub.cancel();
     }
-    await sub.cancel();
+
+    final entries = parseFileList(listContent);
+    _log('file list: ${entries.map((e) => '${e.fileId.toRadixString(16)}:${e.size}B').toList()}');
+
+    // Newest first (file ids are unix timestamps, so descending = latest).
+    final sorted = entries.toList()..sort((a, b) => b.fileId.compareTo(a.fileId));
+    for (final e in sorted) {
+      await _download(cmds, e.fileId);
+    }
   }
 
   Future<void> _download(PlaudCommands cmds, int fileId) async {
     _set(PlaudStatus.syncing, 'Downloading ${fileId.toRadixString(16)}…');
     final asm = PlaudFileAssembler(fileId);
-    final done = Completer<void>();
+    var totalSize = 0;
+    var blockDone = Completer<void>();
     final sub = _frames.stream.listen((f) {
       if (f.isData && f.fileId == fileId) {
         asm.add(f);
         progress = (asm.bytesReceived % 1000000) / 1000000;
         if (asm.bytesReceived % 8000 < 90) notifyListeners();
-      } else if (f.isControl && f.op == 0x1d && !done.isCompleted) {
-        done.complete(); // end-of-file
+      } else if (f.isControl && f.op == 0x16 && f.content.length >= 8) {
+        // op 0x16 reply: [fileid:4][size:4][0401]
+        final sz = f.content[4] |
+            (f.content[5] << 8) |
+            (f.content[6] << 16) |
+            (f.content[7] << 24);
+        if (sz > 0) totalSize = sz;
+        _log('file ${fileId.toRadixString(16)} size=$sz');
+      } else if (f.isControl && f.op == 0x1d) {
+        // end of this download block
+        if (!blockDone.isCompleted) blockDone.complete();
       }
     });
-    await _write(cmds.download(fileId, 0, 0x280));
-    await done.future.timeout(const Duration(seconds: 120), onTimeout: () {
-      _log('download ${fileId.toRadixString(16)} timed out at ${asm.bytesReceived}B');
-    });
+
+    // Query the total size first (op 0x16: [fileid:4][00]).
+    await _sendCmd(cmds, 0x16, [..._le32(fileId), 0x00]);
+    await _settle(ms: 400);
+
+    // Download in 0x280-byte (640) blocks until the whole file is assembled.
+    var offset = 0;
+    var rounds = 0;
+    while ((totalSize == 0 || offset < totalSize) && rounds < 20000) {
+      blockDone = Completer<void>();
+      await _sendCmd(
+          cmds, 0x1c, [..._le32(fileId), ..._le32(offset), ..._le32(0x280)]);
+      await blockDone.future
+          .timeout(const Duration(seconds: 20), onTimeout: () {});
+      final got = asm.bytesReceived;
+      if (got <= offset) {
+        _log('download ${fileId.toRadixString(16)} stalled at $offset');
+        break;
+      }
+      offset = got;
+      rounds++;
+    }
+
     await sub.cancel();
     final bytes = asm.assemble();
     if (bytes.isNotEmpty) {
@@ -245,6 +315,9 @@ class PlaudDeviceSession extends ChangeNotifier {
           'magic=${String.fromCharCodes(bytes.take(8))}');
     }
   }
+
+  static List<int> _le32(int v) =>
+      [v & 0xFF, (v >> 8) & 0xFF, (v >> 16) & 0xFF, (v >> 24) & 0xFF];
 
   Future<void> _settle({int ms = 600}) =>
       Future<void>.delayed(Duration(milliseconds: ms));
@@ -257,10 +330,18 @@ class PlaudDeviceSession extends ChangeNotifier {
   }
 
   static String _hexHead(List<int> b) {
-    final n = b.length < 16 ? b.length : 16;
+    final n = b.length < 64 ? b.length : 64;
     final sb = StringBuffer();
     for (var i = 0; i < n; i++) {
       sb.write(b[i].toRadixString(16).padLeft(2, '0'));
+    }
+    return sb.toString();
+  }
+
+  static String _hex(List<int> b) {
+    final sb = StringBuffer();
+    for (final v in b) {
+      sb.write(v.toRadixString(16).padLeft(2, '0'));
     }
     return sb.toString();
   }
