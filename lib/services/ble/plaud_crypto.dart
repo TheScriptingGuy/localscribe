@@ -39,6 +39,19 @@ class PlaudCrypto {
     return _processBlocks(cipher, wrapped);
   }
 
+  /// PEM public key derived from a private key (the `12 FE 05` enrollment write
+  /// sends the *public* key of the same keypair whose private key we unwrap with).
+  static String publicKeyPemFromPrivate(RSAPrivateKey priv) {
+    // Recover the public exponent with the Carmichael function λ(n)=lcm(p-1,q-1),
+    // because OpenSSL-derived keys set d = e⁻¹ mod λ(n). RSAPrivateKey's own
+    // `publicExponent` uses φ(n), which returns a wrong huge value for such keys.
+    final p1 = priv.p! - BigInt.one;
+    final q1 = priv.q! - BigInt.one;
+    final lambda = (p1 * q1) ~/ p1.gcd(q1);
+    final e = priv.privateExponent!.modInverse(lambda);
+    return CryptoUtils.encodeRSAPublicKeyToPem(RSAPublicKey(priv.modulus!, e));
+  }
+
   /// Unwrap the 80-byte handshake payload into session keys.
   static PlaudSessionKeys sessionKeysFrom(RSAPrivateKey priv, Uint8List wrapped) {
     final pt = rsaUnwrap(priv, wrapped);
