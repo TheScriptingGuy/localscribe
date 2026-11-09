@@ -257,11 +257,31 @@ class PlaudDeviceSession extends ChangeNotifier {
     // Newest first (file ids are unix timestamps, so descending = latest).
     final sorted = entries.toList()..sort((a, b) => b.fileId.compareTo(a.fileId));
     for (final e in sorted) {
+      // A reported size of 0 means the recorder is still actively writing
+      // this file (it's the in-progress recording, not a finished one) — its
+      // fileId is allocated the moment recording starts, so it shows up in
+      // the list immediately and keeps growing for as long as the mic is
+      // live. Downloading it mid-recording yields whatever ambient audio
+      // happened to be captured during the sync itself, not a real memo, and
+      // never reaches a known end (no size to stop at). Skip it; it will
+      // have a real size once the recorder finishes and the user re-syncs.
+      if (e.size <= 0) {
+        _log('skipping ${e.fileId.toRadixString(16)}: size=0 (still recording)');
+        continue;
+      }
       await _download(cmds, e.fileId, e.size);
     }
   }
 
   Future<void> _download(PlaudCommands cmds, int fileId, int knownSize) async {
+    // Never issue an unbounded request (e.g. a 0x7FFFFFFF blockSize) — without
+    // a known size there is no way to tell a finished file from one the
+    // recorder is still actively writing, and requesting "everything" against
+    // a live recording downloads for as long as the mic stays on.
+    if (knownSize <= 0) {
+      _log('refusing to download ${fileId.toRadixString(16)}: unknown size');
+      return;
+    }
     _set(PlaudStatus.syncing, 'Downloading ${fileId.toRadixString(16)}…');
     final asm = PlaudFileAssembler(fileId);
     // Seed from the file-list's reported size (op 0x1a) and never let op 0x16
@@ -287,12 +307,12 @@ class PlaudDeviceSession extends ChangeNotifier {
         // offset=0xFFFFFFFF after real data (the official app's own SDK logs
         // this as "EMPTY_PACKAGE, code: 1" and discards it); it must not be
         // treated as real content.
-        if (totalSize <= 0 || f.offset < totalSize) {
+        if (f.offset < totalSize) {
           asm.add(f);
           progress = (asm.bytesReceived % 1000000) / 1000000;
           if (asm.bytesReceived % 8000 < 90) notifyListeners();
           bumpIdleTimer();
-          if (totalSize > 0 && asm.bytesReceived >= totalSize && !done.isCompleted) {
+          if (asm.bytesReceived >= totalSize && !done.isCompleted) {
             done.complete();
           }
         }
@@ -327,8 +347,8 @@ class PlaudDeviceSession extends ChangeNotifier {
     // in one go (findings/decoded_live_capture.txt) and drains however many
     // data notifications follow until done.
     bumpIdleTimer();
-    await _sendCmd(cmds, 0x1c,
-        [..._le32(fileId), ..._le32(0), ..._le32(totalSize > 0 ? totalSize : 0x7FFFFFFF)]);
+    await _sendCmd(
+        cmds, 0x1c, [..._le32(fileId), ..._le32(0), ..._le32(totalSize)]);
     await done.future.timeout(const Duration(minutes: 10), onTimeout: () {});
     idleTimer?.cancel();
 
