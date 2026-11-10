@@ -116,6 +116,14 @@ class PlaudDeviceSession extends ChangeNotifier {
   Future<String> _scan(String? targetSerial) async {
     _set(PlaudStatus.scanning, 'Scanning for ${PlaudProtocol.deviceName}…');
     final completer = Completer<String>();
+    // Falls back to the first PLAUD-named advert if no serial match shows up
+    // in time — the serial extraction is unverified on real hardware (every
+    // advert has logged serial=? so far), and failing sync entirely whenever
+    // it misses would be worse than the "wrong of two recorders" bug it's
+    // meant to fix. Logged loudly so a wrong-device handshake rejection is
+    // diagnosable rather than silently retried forever.
+    String? fallbackId;
+    String? fallbackName;
     // No service filter: the recorder does not advertise its GATT service UUID
     // (0x1910) — that only appears in the GATT table after connecting. We match
     // purely by advertised device name instead. Log every named advert seen so
@@ -126,7 +134,8 @@ class PlaudDeviceSession extends ChangeNotifier {
     ).listen((d) {
       if (d.name.isNotEmpty) {
         final serial = _serialIn(d.manufacturerData);
-        _log('advert ${d.name} rssi=${d.rssi} serial=${serial ?? '?'}');
+        _log('advert ${d.name} rssi=${d.rssi} serial=${serial ?? '?'} '
+            'mfgData=${_hex(d.manufacturerData)}');
       }
       if (completer.isCompleted) return;
       if (d.name != PlaudProtocol.deviceName && !d.name.startsWith('PLAUD')) {
@@ -134,15 +143,27 @@ class PlaudDeviceSession extends ChangeNotifier {
       }
       if (targetSerial != null && targetSerial.isNotEmpty) {
         final serial = _serialIn(d.manufacturerData);
-        if (serial != targetSerial) return;
+        if (serial != targetSerial) {
+          fallbackId ??= d.id;
+          fallbackName ??= d.name;
+          return;
+        }
       }
       _log('found ${d.name} ${d.id} rssi=${d.rssi}');
       completer.complete(d.id);
     }, onError: (e) {
       if (!completer.isCompleted) completer.completeError(e);
     });
-    final id = await completer.future.timeout(const Duration(seconds: 20),
-        onTimeout: () => throw TimeoutException('recorder not found (is it on and not in the Plaud app?)'));
+    final id = await completer.future.timeout(const Duration(seconds: 8),
+        onTimeout: () {
+      if (fallbackId != null) {
+        _log('no serial match for $targetSerial within 8s; '
+            'falling back to $fallbackName $fallbackId');
+        return fallbackId!;
+      }
+      throw TimeoutException(
+          'recorder not found (is it on and not in the Plaud app?)');
+    });
     await _scanSub?.cancel();
     _scanSub = null;
     return id;
