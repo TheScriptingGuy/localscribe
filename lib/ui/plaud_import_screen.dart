@@ -12,13 +12,15 @@ import '../services/ble/plaud_credentials.dart';
 import '../services/ble/plaud_crypto.dart';
 import '../services/ble/plaud_device.dart';
 import '../services/library/recording_store.dart';
-import 'plaud_credentials_screen.dart';
+import 'plaud_devices_screen.dart';
 import 'theme.dart';
 
 /// Import recordings straight from the user's Plaud recorder over BLE — no
-/// Plaud app, no Plaud servers.
+/// Plaud app, no Plaud servers. Optionally target a specific [serial]; when
+/// omitted the first paired device is used.
 class PlaudImportScreen extends StatefulWidget {
-  const PlaudImportScreen({super.key});
+  final String? serial;
+  const PlaudImportScreen({super.key, this.serial});
 
   @override
   State<PlaudImportScreen> createState() => _PlaudImportScreenState();
@@ -74,7 +76,7 @@ class _PlaudImportScreenState extends State<PlaudImportScreen> {
       // wrap the packets in Ogg so the normal decode → transcribe path works.
       File f;
       try {
-        if (priv == null) throw StateError('no RSA key imported');
+        if (priv == null) throw StateError('no RSA key loaded');
         f = File(p.join(tmp.path, '$stem.opus'));
         await f.writeAsBytes(
             PlaudContainer(d.bytes).toOggOpus(priv), flush: true);
@@ -104,10 +106,10 @@ class _PlaudImportScreenState extends State<PlaudImportScreen> {
         title: const Text('Plaud device'),
         actions: [
           IconButton(
-            icon: const Icon(Icons.key_outlined),
-            tooltip: 'Credentials',
+            icon: const Icon(Icons.devices_outlined),
+            tooltip: 'Devices',
             onPressed: () => Navigator.of(context).push(MaterialPageRoute(
-                builder: (_) => const PlaudCredentialsScreen())),
+                builder: (_) => const PlaudDevicesScreen())),
           ),
         ],
       ),
@@ -121,25 +123,32 @@ class _PlaudImportScreenState extends State<PlaudImportScreen> {
         child: Padding(
           padding: const EdgeInsets.all(24),
           child: Column(mainAxisSize: MainAxisSize.min, children: [
-            const Icon(Icons.key_outlined, size: 48, color: Palette.muted),
+            const Icon(Icons.cloud_off_outlined, size: 48, color: Palette.muted),
             const SizedBox(height: 16),
             const Text(
-              'Import your Plaud credentials first to connect to your recorder.',
+              'Sign in to Plaud first to connect to your recorder.',
               textAlign: TextAlign.center,
               style: TextStyle(color: Palette.muted),
             ),
             const SizedBox(height: 16),
             FilledButton(
               onPressed: () => Navigator.of(context).push(MaterialPageRoute(
-                  builder: (_) => const PlaudCredentialsScreen())),
-              child: const Text('Set up credentials'),
+                  builder: (_) => const PlaudDevicesScreen())),
+              child: const Text('Sign in to Plaud'),
             ),
           ]),
         ),
       );
 
   Widget _syncBody(BuildContext context, PlaudCredentials cred) {
-    final dev = cred.devices.first;
+    final dev = (widget.serial != null
+            ? cred.deviceBySerial(widget.serial!)
+            : null) ??
+        (cred.devices.isNotEmpty ? cred.devices.first : null);
+    if (dev == null) {
+      return const Center(
+          child: Text('No paired device.', style: TextStyle(color: Palette.muted)));
+    }
     return AnimatedBuilder(
       animation: _session,
       builder: (context, _) {

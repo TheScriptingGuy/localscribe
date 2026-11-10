@@ -1,3 +1,5 @@
+import 'dart:io';
+
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
@@ -11,7 +13,7 @@ import 'services/notes/note_jobs.dart';
 import 'services/templates/template_repository.dart';
 import 'services/transcription/transcription_jobs.dart';
 import 'settings/settings.dart';
-import 'ui/plaud_import_screen.dart';
+import 'ui/plaud_devices_screen.dart';
 import 'ui/record_screen.dart';
 import 'ui/recordings_screen.dart';
 import 'ui/templates_screen.dart';
@@ -19,6 +21,18 @@ import 'ui/theme.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
+
+  // Release builds can't write Dart errors to logcat, so persist any unhandled
+  // Flutter error to app-private external storage (readable via adb).
+  FlutterError.onError = (details) {
+    _persistError('${details.exceptionAsString()}\n${details.stack ?? ''}');
+    FlutterError.presentError(details);
+  };
+  WidgetsBinding.instance.platformDispatcher.onError = (error, stack) {
+    _persistError('$error\n$stack');
+    return false;
+  };
+
   RecordingService.init();
 
   final settings = Settings();
@@ -63,6 +77,13 @@ Future<void> main() async {
       llmModels: llmModels,
     ),
   ));
+}
+
+void _persistError(String s) {
+  try {
+    File('/sdcard/Android/data/ai.localscribe.localscribe/files/plaud_error.txt')
+        .writeAsStringSync(s, flush: true);
+  } catch (_) {/* best-effort only */}
 }
 
 class LocalScribeApp extends StatelessWidget {
@@ -150,8 +171,8 @@ class _RootShellState extends State<RootShell> {
               ),
               _SheetAction(
                 icon: Icons.bluetooth_outlined,
-                title: 'Plaud device',
-                subtitle: 'Sync recordings from your recorder over Bluetooth',
+                title: 'Plaud devices',
+                subtitle: 'Pair and sync recordings from your Plaud recorders',
                 onTap: () => Navigator.pop(ctx, 'plaud'),
               ),
             ],
@@ -168,7 +189,7 @@ class _RootShellState extends State<RootShell> {
         await importAudio(context);
       case 'plaud':
         Navigator.of(context)
-            .push(MaterialPageRoute(builder: (_) => const PlaudImportScreen()));
+            .push(MaterialPageRoute(builder: (_) => const PlaudDevicesScreen()));
     }
   }
 
