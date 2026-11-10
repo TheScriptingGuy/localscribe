@@ -68,7 +68,7 @@ class PlaudDeviceSession extends ChangeNotifier {
     _keyChunks.clear();
     try {
       final priv = PlaudCrypto.privateKeyFromPem(cred.rsaPrivateKeyPem!);
-      final id = await _scan();
+      final id = await _scan(dev.serial);
       _deviceId = id;
       await _connect(id);
       await _subscribe(id);
@@ -83,7 +83,37 @@ class PlaudDeviceSession extends ChangeNotifier {
     }
   }
 
-  Future<String> _scan() async {
+  /// Pull a device serial out of the manufacturer data (same extraction as
+  /// `PlaudDevicesScreen._serialIn`): the advert carries the model (first 3
+  /// digits) + serial as ASCII hex; find the 18-hex run and return it
+  /// uppercased.
+  String? _serialIn(Uint8List data) {
+    if (data.isEmpty) return null;
+    final sb = StringBuffer();
+    for (final b in data) {
+      final c = b & 0xff;
+      if (c >= 32 && c < 127) sb.writeCharCode(c);
+    }
+    final runs = RegExp(r'[0-9A-Fa-f]+')
+        .allMatches(sb.toString())
+        .map((m) => m.group(0)!)
+        .toList();
+    for (final r in runs) {
+      if (r.length == 18) return r.toUpperCase();
+    }
+    for (final r in runs) {
+      if (r.length >= 16 && r.length <= 20) return r.toUpperCase();
+    }
+    return null;
+  }
+
+  /// [targetSerial]: when set, two Notes nearby could otherwise answer the
+  /// generic `PLAUD_NOTE` name race in either order, and the recorder that
+  /// isn't enrolled to [targetSerial]'s key rejects the handshake outright —
+  /// that's "can only sync with one of my two recorders". Require the
+  /// advertised serial (from manufacturer data) to match so we always
+  /// connect to the one the selected credential is actually for.
+  Future<String> _scan(String? targetSerial) async {
     _set(PlaudStatus.scanning, 'Scanning for ${PlaudProtocol.deviceName}…');
     final completer = Completer<String>();
     // No service filter: the recorder does not advertise its GATT service UUID
@@ -94,12 +124,20 @@ class PlaudDeviceSession extends ChangeNotifier {
       withServices: const [],
       scanMode: ScanMode.lowLatency,
     ).listen((d) {
-      if (d.name.isNotEmpty) _log('advert ${d.name} rssi=${d.rssi}');
-      if (!completer.isCompleted &&
-          (d.name == PlaudProtocol.deviceName || d.name.startsWith('PLAUD'))) {
-        _log('found ${d.name} ${d.id} rssi=${d.rssi}');
-        completer.complete(d.id);
+      if (d.name.isNotEmpty) {
+        final serial = _serialIn(d.manufacturerData);
+        _log('advert ${d.name} rssi=${d.rssi} serial=${serial ?? '?'}');
       }
+      if (completer.isCompleted) return;
+      if (d.name != PlaudProtocol.deviceName && !d.name.startsWith('PLAUD')) {
+        return;
+      }
+      if (targetSerial != null && targetSerial.isNotEmpty) {
+        final serial = _serialIn(d.manufacturerData);
+        if (serial != targetSerial) return;
+      }
+      _log('found ${d.name} ${d.id} rssi=${d.rssi}');
+      completer.complete(d.id);
     }, onError: (e) {
       if (!completer.isCompleted) completer.completeError(e);
     });
