@@ -47,6 +47,7 @@ class TemplatesScreen extends StatelessWidget {
           ],
         ),
         body: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             const PageHeader('Templates',
                 padding: EdgeInsets.fromLTRB(24, 16, 24, 8)),

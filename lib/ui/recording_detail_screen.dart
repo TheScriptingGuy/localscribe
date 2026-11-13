@@ -13,6 +13,8 @@ import '../services/templates/prompt_builder.dart';
 import '../services/transcription/transcription_jobs.dart';
 import '../services/transcription/transcriber.dart' show CancelSignal;
 import '../settings/settings.dart';
+import '../services/export/transcript_paragraphs.dart';
+import 'detail/share_sheet.dart';
 import 'format.dart';
 import 'markdown_view.dart';
 import 'template_picker.dart';
@@ -222,14 +224,18 @@ class _RecordingDetailScreenState extends State<RecordingDetailScreen> {
             tabs: [Tab(text: 'Transcript'), Tab(text: 'Notes')],
           ),
           actions: [
+            IconButton(
+              tooltip: 'Share & export',
+              icon: const Icon(Icons.ios_share),
+              onPressed: () =>
+                  showShareSheet(context, rec, noteIndex: _noteIndex),
+            ),
             PopupMenuButton<String>(
               icon: const Icon(Icons.more_horiz),
               onSelected: (v) {
                 switch (v) {
                   case 'rename':
                     _rename(rec);
-                  case 'copy':
-                    _copy(transcript?.text ?? '', 'Transcript');
                   case 'retranscribe':
                     _transcribe(rec);
                   case 'speakers':
@@ -241,9 +247,6 @@ class _RecordingDetailScreenState extends State<RecordingDetailScreen> {
               },
               itemBuilder: (_) => [
                 const PopupMenuItem(value: 'rename', child: Text('Rename')),
-                if (transcript != null)
-                  const PopupMenuItem(
-                      value: 'copy', child: Text('Copy transcript')),
                 if (transcript != null && !jobs.isRunning(rec.id)) ...[
                   const PopupMenuItem(
                       value: 'retranscribe', child: Text('Transcribe again')),
@@ -366,31 +369,8 @@ class _RecordingDetailScreenState extends State<RecordingDetailScreen> {
   /// changes, on a pause of 2 s+, or once a paragraph is long and the last
   /// segment ends a sentence.
   static List<List<TranscriptSegment>> _paragraphs(
-      Recording rec, List<TranscriptSegment> segments) {
-    String? nameOf(TranscriptSegment s) =>
-        s.speaker == null ? null : rec.speakerName(s.speaker!);
-    final out = <List<TranscriptSegment>>[];
-    var current = <TranscriptSegment>[];
-    var chars = 0;
-    for (final s in segments) {
-      if (current.isNotEmpty) {
-        final gap = s.start - current.last.end;
-        final endsSentence =
-            RegExp(r'[.!?…]["”’)]?$').hasMatch(current.last.text.trim());
-        if (nameOf(s) != nameOf(current.last) ||
-            gap >= 2 ||
-            (chars > 280 && endsSentence)) {
-          out.add(current);
-          current = [];
-          chars = 0;
-        }
-      }
-      current.add(s);
-      chars += s.text.length;
-    }
-    if (current.isNotEmpty) out.add(current);
-    return out;
-  }
+          Recording rec, List<TranscriptSegment> segments) =>
+      groupTranscriptParagraphs(rec, segments);
 
   Widget _notesTab(Recording rec, NoteJobs notes) {
     if (rec.transcript == null) {

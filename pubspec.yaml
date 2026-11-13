@@ -26,6 +26,8 @@ dependencies:
   record: ^7.1.2
   just_audio: ^0.10.6
   file_picker: ^13.3.1
+  share_plus: ">=11.0.0 <14.0.0"
+  pdf: ^3.11.0
   flutter_foreground_task: ^11.0.3 # keeps mic recording alive in background
 
   # On-device transcription: whisper.cpp + MediaCodec decoding via FFI
@@ -67,3 +69,4 @@ flutter:
   uses-material-design: true
   assets:
     - assets/templates/
+    - assets/fonts/
