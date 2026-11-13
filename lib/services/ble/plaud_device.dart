@@ -280,6 +280,17 @@ class PlaudDeviceSession extends ChangeNotifier {
     await _sendCmd(cmds, 0x6c, const []);
     await _settle();
 
+    // ops 0x19 then 0x18, verified against the real app's capture
+    // (findings/decoded_live_capture.txt): OUT 0x19 content=00 -> IN 0x22
+    // content=00, OUT 0x18 content=(empty) -> IN 0x21 content=00. LocalScribe
+    // never sent these, which left the recorder free to auto-start a new
+    // recording as soon as it was connected — these appear to be the
+    // official app's "entering sync, don't record" signal.
+    await _sendCmd(cmds, 0x19, const [0x00]);
+    await _settle();
+    await _sendCmd(cmds, 0x18, const []);
+    await _settle();
+
     // op 0x1a = list pending files, verified against a live capture of the
     // real app (findings/decoded_live_capture.txt): content =
     // [echo:4][count:4 LE] + count x [fileId:4][size:4 LE][flags:2].
