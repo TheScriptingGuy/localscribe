@@ -7,7 +7,6 @@
 #include <media/NdkMediaCodec.h>
 #include <media/NdkMediaExtractor.h>
 #include <media/NdkMediaFormat.h>
-#include <cerrno>
 #include <fcntl.h>
 #include <sys/stat.h>
 #include <unistd.h>
@@ -167,47 +166,6 @@ void read_output_format(AMediaFormat *fmt, PcmWriter &w, int32_t &encoding) {
     AMediaFormat_getInt32(fmt, AMEDIAFORMAT_KEY_CHANNEL_COUNT, &channels);
     if (AMediaFormat_getInt32(fmt, "pcm-encoding", &enc)) encoding = enc;
     w.set_input(rate, channels);
-}
-
-// TEMP DEBUG: dumps the raw 16 kHz mono PCM whisper actually consumes to a
-// WAV file under /sdcard/Download so it can be pulled and listened to.
-// Remove once the whisper mis-transcription is diagnosed.
-void debug_dump_wav(const char *pcm_path, int64_t samples) {
-    FILE *in = fopen(pcm_path, "rb");
-    if (!in) return;
-    // App's own external-files dir needs no permission (scoped storage) and
-    // is reachable via `adb pull` even though the app itself isn't debuggable.
-    // Nothing has called Context.getExternalFilesDir() yet, so the directory
-    // doesn't exist on disk -- create it ourselves.
-    mkdir("/storage/emulated/0/Android/data/ai.localscribe.localscribe/files", 0775);
-    FILE *out = fopen(
-        "/storage/emulated/0/Android/data/ai.localscribe.localscribe/files/ls_whisper_debug.wav",
-        "wb");
-    if (!out) { fclose(in); LOGE("debug_dump_wav: fopen failed: %s", strerror(errno)); return; }
-    const int32_t byteRate = kRate * 2;
-    const int16_t blockAlign = 2;
-    const int32_t dataSize = (int32_t)(samples * 2);
-    const int32_t riffSize = 36 + dataSize;
-    fwrite("RIFF", 1, 4, out);
-    fwrite(&riffSize, 4, 1, out);
-    fwrite("WAVE", 1, 4, out);
-    fwrite("fmt ", 1, 4, out);
-    int32_t fmtSize = 16; fwrite(&fmtSize, 4, 1, out);
-    int16_t audioFormat = 1; fwrite(&audioFormat, 2, 1, out);
-    int16_t numChannels = 1; fwrite(&numChannels, 2, 1, out);
-    int32_t sampleRate = kRate; fwrite(&sampleRate, 4, 1, out);
-    fwrite(&byteRate, 4, 1, out);
-    fwrite(&blockAlign, 2, 1, out);
-    int16_t bitsPerSample = 16; fwrite(&bitsPerSample, 2, 1, out);
-    fwrite("data", 1, 4, out);
-    fwrite(&dataSize, 4, 1, out);
-    char buf[16384];
-    size_t n;
-    while ((n = fread(buf, 1, sizeof buf, in)) > 0) fwrite(buf, 1, n, out);
-    fclose(in);
-    fclose(out);
-    LOGI("debug_dump_wav: wrote %lld samples to /sdcard/Download/ls_whisper_debug.wav",
-         (long long)samples);
 }
 
 // Decodes the first audio track of `path` into `pcm_path`. Returns the
@@ -466,6 +424,9 @@ bool transcribe_span(whisper_context *ctx, FILE *f, Span &s, int n_threads, Job 
         wp.print_timestamps = false;
         wp.print_special = false;
         wp.token_timestamps = true;
+        // Suppress non-speech caption tokens (e.g. "(dishes clinking)"),
+        // a known whisper hallucination on short/sparse clips.
+        wp.suppress_nst = true;
 
         ProgressCtx pc{job, kDecodeShare + (int)((1000 - kDecodeShare) * (done + pos - s.from) / work),
                        (int)((1000 - kDecodeShare) * (int64_t)use / work)};
@@ -565,7 +526,6 @@ LS_API char *ls_transcribe(const char *model_path, const char *audio_path, const
         unlink(pcm_path);
         return json_error(err);
     }
-    debug_dump_wav(pcm_path, total);
     const bool pieces = ranges && n_ranges > 0;
     if (!pieces && total < kRate / 2) {
         unlink(pcm_path);
