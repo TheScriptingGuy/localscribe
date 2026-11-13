@@ -56,10 +56,17 @@ jobs:
         # addition to `flutter analyze`. The bundled lint tool itself crashes
         # here (NoSuchMethodError: List.removeLast(), a known lint/Kotlin
         # runtime-version mismatch) — unrelated to our source, unfixable from
-        # app code, so just turn the task off everywhere.
+        # app code. Disable it via a Gradle init script (applied to the Gradle
+        # instance itself, before any project/settings script runs) rather
+        # than editing android/build.gradle directly: appending to that file
+        # broke the Flutter plugin's "flutter" extension registration on
+        # other subprojects (an ordering interaction with how the Flutter
+        # Gradle plugin wires itself up), so keep this entirely out of the
+        # project's own build scripts.
         run: |
-          cat >> android/build.gradle <<'EOF'
-          subprojects {
+          mkdir -p "$HOME/.gradle/init.d"
+          cat > "$HOME/.gradle/init.d/disable-lint-vital.gradle" <<'EOF'
+          allprojects {
               tasks.whenTaskAdded { task ->
                   if (task.name.startsWith('lintVital')) {
                       task.enabled = false
