@@ -124,12 +124,15 @@ class LocalScribeApp extends StatelessWidget {
         ChangeNotifierProvider.value(value: jobs),
         ChangeNotifierProvider.value(value: noteJobs),
       ],
-      child: MaterialApp(
-        title: 'LocalScribe',
-        debugShowCheckedModeBanner: false,
-        theme: buildTheme(),
-        themeMode: ThemeMode.light,
-        home: const RootShell(),
+      child: Consumer<Settings>(
+        builder: (context, s, _) => MaterialApp(
+          title: 'LocalScribe',
+          debugShowCheckedModeBanner: false,
+          theme: buildTheme(Brightness.light),
+          darkTheme: buildTheme(Brightness.dark),
+          themeMode: s.themeMode,
+          home: const RootShell(),
+        ),
       ),
     );
   }
@@ -200,7 +203,7 @@ class _RootShellState extends State<RootShell> {
       floatingActionButtonLocation: FloatingActionButtonLocation.centerDocked,
       floatingActionButton: _NewButton(onPressed: _newRecording),
       bottomNavigationBar: BottomAppBar(
-        color: Palette.surface,
+        color: context.colors.surface,
         surfaceTintColor: Colors.transparent,
         elevation: 0,
         height: 64,
@@ -241,16 +244,16 @@ class _NewButton extends StatelessWidget {
     return Tooltip(
       message: 'New recording',
       child: Material(
-        color: Palette.text,
-        shape: const CircleBorder(
-            side: BorderSide(color: Palette.surface, width: 5)),
+        color: context.colors.text,
+        shape: CircleBorder(
+            side: BorderSide(color: context.colors.surface, width: 5)),
         clipBehavior: Clip.antiAlias,
         child: InkWell(
           onTap: onPressed,
-          child: const SizedBox(
+          child: SizedBox(
             width: 72,
             height: 72,
-            child: Icon(Icons.add, color: Colors.white, size: 34),
+            child: Icon(Icons.add, color: context.colors.inverse, size: 34),
           ),
         ),
       ),
@@ -276,8 +279,8 @@ class _SheetAction extends StatelessWidget {
       contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
       leading: CircleAvatar(
         radius: 24,
-        backgroundColor: Palette.fill,
-        foregroundColor: Palette.text,
+        backgroundColor: context.colors.fill,
+        foregroundColor: context.colors.text,
         child: Icon(icon),
       ),
       title: Text(title,

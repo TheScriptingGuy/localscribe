@@ -1,5 +1,6 @@
 import 'dart:convert';
 import 'package:flutter/foundation.dart';
+import 'package:flutter/material.dart' show ThemeMode;
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../models/ai_config.dart';
@@ -16,11 +17,15 @@ class Settings extends ChangeNotifier {
   /// Default output language for notes ('auto' = follow transcript).
   String noteLanguage;
 
+  /// Light, dark or follow the system.
+  ThemeMode themeMode;
+
   Settings({
     TranscriptionConfig? transcription,
     NoteAiConfig? noteAi,
     SpeakerConfig? speakers,
     this.noteLanguage = 'auto',
+    this.themeMode = ThemeMode.system,
   })  : transcription = transcription ?? TranscriptionConfig(),
         noteAi = noteAi ?? NoteAiConfig(),
         speakers = speakers ?? SpeakerConfig();
@@ -43,6 +48,9 @@ class Settings extends ChangeNotifier {
             SpeakerConfig.fromJson(Map<String, dynamic>.from(j['speakers']));
       }
       noteLanguage = j['noteLanguage'] ?? 'auto';
+      themeMode = ThemeMode.values.firstWhere(
+          (m) => m.name == j['themeMode'],
+          orElse: () => ThemeMode.system);
     } catch (_) {
       // Ignore corrupt settings.
     }
@@ -58,6 +66,7 @@ class Settings extends ChangeNotifier {
         'noteAi': noteAi.toJson(),
         'speakers': speakers.toJson(),
         'noteLanguage': noteLanguage,
+        'themeMode': themeMode.name,
       }),
     );
     notifyListeners();

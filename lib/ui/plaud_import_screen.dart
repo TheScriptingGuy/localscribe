@@ -123,12 +123,13 @@ class _PlaudImportScreenState extends State<PlaudImportScreen> {
         child: Padding(
           padding: const EdgeInsets.all(24),
           child: Column(mainAxisSize: MainAxisSize.min, children: [
-            const Icon(Icons.cloud_off_outlined, size: 48, color: Palette.muted),
+            Icon(Icons.cloud_off_outlined,
+                size: 48, color: context.colors.muted),
             const SizedBox(height: 16),
-            const Text(
+            Text(
               'Sign in to Plaud first to connect to your recorder.',
               textAlign: TextAlign.center,
-              style: TextStyle(color: Palette.muted),
+              style: TextStyle(color: context.colors.muted),
             ),
             const SizedBox(height: 16),
             FilledButton(
@@ -146,8 +147,9 @@ class _PlaudImportScreenState extends State<PlaudImportScreen> {
             : null) ??
         (cred.devices.isNotEmpty ? cred.devices.first : null);
     if (dev == null) {
-      return const Center(
-          child: Text('No paired device.', style: TextStyle(color: Palette.muted)));
+      return Center(
+          child: Text('No paired device.',
+              style: TextStyle(color: context.colors.muted)));
     }
     return AnimatedBuilder(
       animation: _session,
@@ -173,7 +175,7 @@ class _PlaudImportScreenState extends State<PlaudImportScreen> {
                   style: const TextStyle(fontWeight: FontWeight.w700)),
               const SizedBox(width: 8),
               Expanded(child: Text(_session.message,
-                  style: const TextStyle(color: Palette.muted))),
+                  style: TextStyle(color: context.colors.muted))),
             ]),
             if (_session.status == PlaudStatus.syncing && _session.progress > 0)
               Padding(
@@ -191,7 +193,7 @@ class _PlaudImportScreenState extends State<PlaudImportScreen> {
             Container(
               padding: const EdgeInsets.all(10),
               decoration: BoxDecoration(
-                color: Palette.fill,
+                color: context.colors.fill,
                 borderRadius: BorderRadius.circular(8),
               ),
               child: SelectableText(

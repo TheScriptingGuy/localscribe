@@ -60,6 +60,33 @@ class _OptionsScreenState extends State<OptionsScreen> {
           const PageHeader('Options',
               subtitle: 'Where transcription and notes run',
               padding: EdgeInsets.fromLTRB(0, 8, 0, 24)),
+          _sectionTitle(context, 'Appearance'),
+          SizedBox(
+            width: double.infinity,
+            child: SegmentedButton<ThemeMode>(
+              showSelectedIcon: false,
+              segments: const [
+                ButtonSegment(
+                    value: ThemeMode.system,
+                    icon: Icon(Icons.brightness_auto_outlined),
+                    label: Text('System')),
+                ButtonSegment(
+                    value: ThemeMode.light,
+                    icon: Icon(Icons.light_mode_outlined),
+                    label: Text('Light')),
+                ButtonSegment(
+                    value: ThemeMode.dark,
+                    icon: Icon(Icons.dark_mode_outlined),
+                    label: Text('Dark')),
+              ],
+              selected: {settings.themeMode},
+              onSelectionChanged: (s) {
+                settings.themeMode = s.first;
+                settings.save();
+              },
+            ),
+          ),
+          const SizedBox(height: 28),
           _sectionTitle(context, 'Transcription AI'),
           _modeToggle(
             onDevice: t.onDevice,

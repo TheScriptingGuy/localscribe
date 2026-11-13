@@ -107,8 +107,8 @@ class _RecordingDetailScreenState extends State<RecordingDetailScreen> {
             ),
             if (others.isNotEmpty) ...[
               const SizedBox(height: 16),
-              const Text('Or the same person as:',
-                  style: TextStyle(color: Palette.muted)),
+              Text('Or the same person as:',
+                  style: TextStyle(color: context.colors.muted)),
               const SizedBox(height: 8),
               Wrap(
                 spacing: 8,
@@ -375,7 +375,7 @@ class _RecordingDetailScreenState extends State<RecordingDetailScreen> {
             if (language != null && language.isNotEmpty)
               language.toUpperCase(),
           ].join('  |  '),
-          style: const TextStyle(color: Palette.muted, fontSize: 15),
+          style: TextStyle(color: context.colors.muted, fontSize: 15),
         ),
         const SizedBox(height: 20),
         const Divider(height: 1),
@@ -468,7 +468,7 @@ class _RecordingDetailScreenState extends State<RecordingDetailScreen> {
                 ),
               Center(
                 child: Material(
-                  color: Palette.fill,
+                  color: context.colors.fill,
                   borderRadius: BorderRadius.circular(8),
                   child: InkWell(
                     borderRadius: BorderRadius.circular(8),
@@ -505,7 +505,7 @@ class _RecordingDetailScreenState extends State<RecordingDetailScreen> {
                     child: Text(
                       (note.auto ? 'Auto · ' : '') +
                           formatRelativeDate(note.createdAt),
-                      style: const TextStyle(color: Palette.muted),
+                      style: TextStyle(color: context.colors.muted),
                     ),
                   ),
                   IconButton(
@@ -547,7 +547,7 @@ class _NoteTab extends StatelessWidget {
             label,
             style: TextStyle(
               fontSize: 17,
-              color: selected ? Palette.text : Palette.muted,
+              color: selected ? context.colors.text : context.colors.muted,
               fontWeight: selected ? FontWeight.w700 : FontWeight.w400,
             ),
           ),
@@ -586,10 +586,10 @@ class _TranscriptParagraph extends StatelessWidget {
               children: [
                 Text(
                   formatSeconds(start),
-                  style: const TextStyle(
-                    color: Palette.muted,
+                  style: TextStyle(
+                    color: context.colors.muted,
                     fontSize: 14,
-                    fontFeatures: [FontFeature.tabularFigures()],
+                    fontFeatures: const [FontFeature.tabularFigures()],
                   ),
                 ),
                 if (name != null) ...[
@@ -633,14 +633,17 @@ class _AskBar extends StatelessWidget {
           child: InkWell(
             onTap: onTap,
             borderRadius: BorderRadius.circular(12),
-            child: const Padding(
-              padding: EdgeInsets.symmetric(horizontal: 18, vertical: 16),
+            child: Padding(
+              padding:
+                  const EdgeInsets.symmetric(horizontal: 18, vertical: 16),
               child: Row(
                 children: [
-                  Icon(Icons.auto_awesome, size: 20, color: Palette.muted),
-                  SizedBox(width: 12),
+                  Icon(Icons.auto_awesome,
+                      size: 20, color: context.colors.muted),
+                  const SizedBox(width: 12),
                   Text('Ask AI about this recording',
-                      style: TextStyle(color: Palette.muted, fontSize: 16)),
+                      style: TextStyle(
+                          color: context.colors.muted, fontSize: 16)),
                 ],
               ),
             ),
@@ -672,7 +675,7 @@ class _PlayerBar extends StatelessWidget {
                   snap.data?.processingState == ProcessingState.completed;
               return IconButton(
                 style: IconButton.styleFrom(
-                  backgroundColor: Palette.fill,
+                  backgroundColor: context.colors.fill,
                   fixedSize: const Size(56, 56),
                 ),
                 iconSize: 30,
@@ -875,8 +878,8 @@ class _ChatScreenState extends State<_ChatScreen> {
                       padding: const EdgeInsets.only(right: 6),
                       child: IconButton.filled(
                         style: IconButton.styleFrom(
-                          backgroundColor: Palette.text,
-                          foregroundColor: Colors.white,
+                          backgroundColor: context.colors.text,
+                          foregroundColor: context.colors.inverse,
                         ),
                         icon: const Icon(Icons.arrow_upward, size: 20),
                         onPressed: _pending == null ? () => _send(rec) : null,
@@ -915,7 +918,7 @@ class _Bubble extends StatelessWidget {
         constraints:
             BoxConstraints(maxWidth: MediaQuery.sizeOf(context).width * 0.75),
         decoration: BoxDecoration(
-          color: Palette.fill,
+          color: context.colors.fill,
           borderRadius: BorderRadius.circular(18),
         ),
         child: SelectableText(text, style: const TextStyle(fontSize: 16)),
@@ -949,8 +952,8 @@ class _TranscribeProgress extends StatelessWidget {
             child: LinearProgressIndicator(value: p, minHeight: 4),
           ),
           const SizedBox(height: 12),
-          const Text('You can leave this screen; it keeps going.',
-              style: TextStyle(color: Palette.muted)),
+          Text('You can leave this screen; it keeps going.',
+              style: TextStyle(color: context.colors.muted)),
           const SizedBox(height: 20),
           OutlinedButton(onPressed: onCancel, child: const Text('Cancel')),
         ],
@@ -975,8 +978,8 @@ class _CallToAction extends StatelessWidget {
         mainAxisSize: MainAxisSize.min,
         children: [
           Text(text,
-              style: const TextStyle(
-                  color: Palette.muted, fontSize: 16, height: 1.5)),
+              style: TextStyle(
+                  color: context.colors.muted, fontSize: 16, height: 1.5)),
           if (button != null) ...[const SizedBox(height: 20), button!],
         ],
       ),

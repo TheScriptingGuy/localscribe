@@ -215,16 +215,17 @@ class _PlaudDevicesScreenState extends State<PlaudDevicesScreen> {
   Widget _signInBody() => ListView(
         padding: const EdgeInsets.all(16),
         children: [
-          const Text(
+          Text(
             'Sign in to Plaud to pair every recorder on your account.',
-            style: TextStyle(color: Palette.muted, height: 1.4),
+            style: TextStyle(color: context.colors.muted, height: 1.4),
           ),
           const SizedBox(height: 8),
-          const Text(
+          Text(
             'Your password is sealed with the Plaud server key before it leaves '
             'this device, and only your escrowed e2ee key + device signatures '
             'are stored here. Nothing is sent to LocalScribe.',
-            style: TextStyle(color: Palette.faint, height: 1.4, fontSize: 13),
+            style: TextStyle(
+                color: context.colors.faint, height: 1.4, fontSize: 13),
           ),
           const SizedBox(height: 20),
           TextField(
@@ -251,7 +252,7 @@ class _PlaudDevicesScreenState extends State<PlaudDevicesScreen> {
           ),
           if (_error != null) ...[
             const SizedBox(height: 12),
-            Text(_error!, style: const TextStyle(color: Palette.danger)),
+            Text(_error!, style: TextStyle(color: context.colors.danger)),
           ],
         ],
       );
@@ -281,14 +282,14 @@ class _PlaudDevicesScreenState extends State<PlaudDevicesScreen> {
                 _scanning
                     ? 'Looking for nearby recorders…'
                     : 'Nearby: ${_nearbyIds.length} recorder(s) advertising',
-                style: const TextStyle(color: Palette.muted),
+                style: TextStyle(color: context.colors.muted),
               ),
             ),
           if (cred.devices.isEmpty)
-            const Padding(
-              padding: EdgeInsets.symmetric(vertical: 24),
+            Padding(
+              padding: const EdgeInsets.symmetric(vertical: 24),
               child: Text('No devices on this account.',
-                  style: TextStyle(color: Palette.muted)),
+                  style: TextStyle(color: context.colors.muted)),
             )
           else
             ...cred.devices.map((d) => _deviceCard(d)),
@@ -300,7 +301,7 @@ class _PlaudDevicesScreenState extends State<PlaudDevicesScreen> {
           ),
           if (_error != null) ...[
             const SizedBox(height: 12),
-            Text(_error!, style: const TextStyle(color: Palette.danger)),
+            Text(_error!, style: TextStyle(color: context.colors.danger)),
           ],
           const SizedBox(height: 24),
           const Divider(),
@@ -310,9 +311,9 @@ class _PlaudDevicesScreenState extends State<PlaudDevicesScreen> {
               await context.read<PlaudCredentials>().clear();
               if (mounted) setState(() {});
             },
-            icon: const Icon(Icons.logout, color: Palette.danger),
-            label: const Text('Sign out of Plaud',
-                style: TextStyle(color: Palette.danger)),
+            icon: Icon(Icons.logout, color: context.colors.danger),
+            label: Text('Sign out of Plaud',
+                style: TextStyle(color: context.colors.danger)),
           ),
         ],
       );
@@ -334,8 +335,8 @@ class _PlaudDevicesScreenState extends State<PlaudDevicesScreen> {
             children: [
               CircleAvatar(
                 radius: 22,
-                backgroundColor: Palette.fill,
-                foregroundColor: Palette.text,
+                backgroundColor: context.colors.fill,
+                foregroundColor: context.colors.text,
                 child: const Icon(Icons.headphones_outlined),
               ),
               const SizedBox(width: 12),
@@ -349,15 +350,17 @@ class _PlaudDevicesScreenState extends State<PlaudDevicesScreen> {
                     const SizedBox(height: 2),
                     Text(
                       '${_modelLabel(d.serial)} · ${d.serial}',
-                      style: const TextStyle(color: Palette.muted, fontSize: 13),
+                      style: TextStyle(color: context.colors.muted, fontSize: 13),
                     ),
                   ],
                 ),
               ),
-              _badge(paired ? 'Paired' : 'No key', paired ? null : Palette.danger),
+              paired
+                  ? _badge('Paired', null, null)
+                  : _badge('No key', context.colors.danger, Colors.white),
               if (nearby) ...[
                 const SizedBox(width: 6),
-                _badge('Nearby', Palette.text),
+                _badge('Nearby', context.colors.text, context.colors.inverse),
               ],
             ],
           ),
@@ -381,16 +384,16 @@ class _PlaudDevicesScreenState extends State<PlaudDevicesScreen> {
     }
   }
 
-  Widget _badge(String label, Color? color) => Container(
+  Widget _badge(String label, Color? bg, Color? fg) => Container(
         padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
         decoration: BoxDecoration(
-          color: color ?? Palette.fill,
+          color: bg ?? context.colors.fill,
           borderRadius: BorderRadius.circular(999),
         ),
         child: Text(
           label,
           style: TextStyle(
-            color: color == null ? Palette.text : Colors.white,
+            color: fg ?? context.colors.text,
             fontSize: 12,
             fontWeight: FontWeight.w600,
           ),

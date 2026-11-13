@@ -15,15 +15,16 @@ class MarkdownView extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final body = Theme.of(context).textTheme.bodyLarge!;
+    final c = context.colors;
     return SelectionArea(
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: _blocks(body),
+        children: _blocks(body, c),
       ),
     );
   }
 
-  List<Widget> _blocks(TextStyle body) {
+  List<Widget> _blocks(TextStyle body, AppColors c) {
     final out = <Widget>[];
     final para = <String>[];
     final code = <String>[];
@@ -33,7 +34,7 @@ class MarkdownView extends StatelessWidget {
       if (para.isEmpty) return;
       out.add(Padding(
         padding: const EdgeInsets.only(bottom: 12),
-        child: Text.rich(_inline(para.join(' '), body)),
+        child: Text.rich(_inline(para.join(' '), body, c)),
       ));
       para.clear();
     }
@@ -42,7 +43,7 @@ class MarkdownView extends StatelessWidget {
       final line = raw.trimRight();
       if (line.trimLeft().startsWith('```')) {
         if (inCode) {
-          out.add(_codeBlock(code.join('\n'), body));
+          out.add(_codeBlock(code.join('\n'), body, c));
           code.clear();
         } else {
           flush();
@@ -62,7 +63,8 @@ class MarkdownView extends StatelessWidget {
       final heading = RegExp(r'^(#{1,6})\s+(.*)$').firstMatch(line);
       if (heading != null) {
         flush();
-        out.add(_heading(heading.group(1)!.length, heading.group(2)!, body));
+        out.add(_heading(
+            heading.group(1)!.length, heading.group(2)!, body, c));
         continue;
       }
       if (RegExp(r'^\s*([-*_])(\s*\1){2,}\s*$').hasMatch(line)) {
@@ -80,12 +82,13 @@ class MarkdownView extends StatelessWidget {
           text: bullet != null ? bullet.group(2)! : numbered!.group(3)!,
           indent: indent,
           body: body,
+          c: c,
         ));
         continue;
       }
       if (line.startsWith('>')) {
         flush();
-        out.add(_quote(line.replaceFirst(RegExp(r'^>\s?'), ''), body));
+        out.add(_quote(line.replaceFirst(RegExp(r'^>\s?'), ''), body, c));
         continue;
       }
       if (line.trimLeft().startsWith('|')) {
@@ -97,12 +100,12 @@ class MarkdownView extends StatelessWidget {
       }
       para.add(line.trim());
     }
-    if (inCode) out.add(_codeBlock(code.join('\n'), body));
+    if (inCode) out.add(_codeBlock(code.join('\n'), body, c));
     flush();
     return out;
   }
 
-  Widget _heading(int level, String text, TextStyle body) {
+  Widget _heading(int level, String text, TextStyle body, AppColors c) {
     final (size, top) = switch (level) {
       1 => compact ? (22.0, 8.0) : (30.0, 8.0),
       2 => compact ? (19.0, 12.0) : (24.0, 24.0),
@@ -114,7 +117,7 @@ class MarkdownView extends StatelessWidget {
         height: 1.25);
     return Padding(
       padding: EdgeInsets.only(top: top, bottom: 10),
-      child: Text.rich(_inline(text, style)),
+      child: Text.rich(_inline(text, style, c)),
     );
   }
 
@@ -123,6 +126,7 @@ class MarkdownView extends StatelessWidget {
     required String text,
     required int indent,
     required TextStyle body,
+    required AppColors c,
   }) {
     return Padding(
       padding: EdgeInsets.only(left: 4.0 + indent * 20, bottom: 6),
@@ -131,27 +135,27 @@ class MarkdownView extends StatelessWidget {
         children: [
           SizedBox(
             width: marker == '•' ? 18 : 26,
-            child: Text(marker, style: body.copyWith(color: Palette.muted)),
+            child: Text(marker, style: body.copyWith(color: c.muted)),
           ),
-          Expanded(child: Text.rich(_inline(text, body))),
+          Expanded(child: Text.rich(_inline(text, body, c))),
         ],
       ),
     );
   }
 
-  Widget _quote(String text, TextStyle body) => Container(
+  Widget _quote(String text, TextStyle body, AppColors c) => Container(
         margin: const EdgeInsets.only(bottom: 12),
         padding: const EdgeInsets.only(left: 14),
-        decoration: const BoxDecoration(
-            border: Border(left: BorderSide(color: Palette.line, width: 3))),
-        child: Text.rich(_inline(text, body.copyWith(color: Palette.muted))),
+        decoration: BoxDecoration(
+            border: Border(left: BorderSide(color: c.line, width: 3))),
+        child: Text.rich(_inline(text, body.copyWith(color: c.muted), c)),
       );
 
-  Widget _codeBlock(String text, TextStyle body) => Container(
+  Widget _codeBlock(String text, TextStyle body, AppColors c) => Container(
         margin: const EdgeInsets.only(bottom: 12),
         padding: const EdgeInsets.all(12),
         decoration: BoxDecoration(
-          color: Palette.fill,
+          color: c.fill,
           borderRadius: BorderRadius.circular(10),
         ),
         child: Text(text,
@@ -161,7 +165,7 @@ class MarkdownView extends StatelessWidget {
   static final _inlinePattern =
       RegExp(r'\*\*(.+?)\*\*|__(.+?)__|\*([^*\s][^*]*?)\*|`([^`]+)`');
 
-  TextSpan _inline(String text, TextStyle style) {
+  TextSpan _inline(String text, TextStyle style, AppColors c) {
     final spans = <InlineSpan>[];
     var pos = 0;
     for (final m in _inlinePattern.allMatches(text)) {
@@ -177,8 +181,8 @@ class MarkdownView extends StatelessWidget {
       } else {
         spans.add(TextSpan(
             text: m.group(4),
-            style: const TextStyle(
-                fontFamily: 'monospace', backgroundColor: Palette.fill)));
+            style: TextStyle(
+                fontFamily: 'monospace', backgroundColor: c.fill)));
       }
       pos = m.end;
     }

@@ -60,7 +60,7 @@ class OptionsButton extends StatelessWidget {
       padding: const EdgeInsets.only(right: 16),
       child: IconButton(
         tooltip: 'Options',
-        style: IconButton.styleFrom(backgroundColor: Palette.fill),
+        style: IconButton.styleFrom(backgroundColor: context.colors.fill),
         icon: const Icon(Icons.tune),
         onPressed: () => Navigator.of(context)
             .push(MaterialPageRoute(builder: (_) => const OptionsScreen())),
@@ -126,7 +126,7 @@ class _RecordingRow extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final r = recording;
-    const meta = TextStyle(color: Palette.muted, fontSize: 15);
+    final meta = TextStyle(color: context.colors.muted, fontSize: 15);
     final t = transcribing;
     return InkWell(
       onTap: () => Navigator.of(context).push(MaterialPageRoute(
@@ -188,7 +188,7 @@ class _RecordingRow extends StatelessWidget {
                       RecordingSource.plaud => Icons.bluetooth_audio,
                     },
                     size: 18,
-                    color: Palette.faint,
+                    color: context.colors.faint,
                   ),
                 ],
               ),
@@ -214,7 +214,7 @@ class _MetaSeparator extends StatelessWidget {
         width: 1,
         height: 14,
         margin: const EdgeInsets.symmetric(horizontal: 12),
-        color: Palette.line,
+        color: context.colors.line,
       );
 }
 
@@ -230,10 +230,10 @@ class _Badge extends StatelessWidget {
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Icon(icon, size: 18, color: Palette.muted),
+          Icon(icon, size: 18, color: context.colors.muted),
           const SizedBox(width: 4),
           Text(label,
-              style: const TextStyle(color: Palette.muted, fontSize: 13)),
+              style: TextStyle(color: context.colors.muted, fontSize: 13)),
         ],
       ),
     );
@@ -245,16 +245,16 @@ class _EmptyState extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return const Padding(
-      padding: EdgeInsets.fromLTRB(24, 48, 24, 24),
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(24, 48, 24, 24),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text('No recordings yet', style: TextStyle(fontSize: 18)),
-          SizedBox(height: 8),
+          const Text('No recordings yet', style: TextStyle(fontSize: 18)),
+          const SizedBox(height: 8),
           Text(
             'Tap + to record with the phone mic or import an audio file.',
-            style: TextStyle(color: Palette.muted, fontSize: 15),
+            style: TextStyle(color: context.colors.muted, fontSize: 15),
           ),
         ],
       ),

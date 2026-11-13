@@ -1,18 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
-/// Monochrome, paper-like look: off-white ground, black ink, grey meta text,
-/// hairline dividers. The only colour is the AI gradient on Ask-AI surfaces.
+/// Colours that do not change between light and dark mode.
 abstract final class Palette {
-  static const ground = Color(0xFFF8F8F8);
-  static const surface = Color(0xFFFFFFFF);
-  static const fill = Color(0xFFEDEDED); // grey pills, play button
-  static const text = Color(0xFF111111);
-  static const muted = Color(0xFF8E8E8E);
-  static const faint = Color(0xFFBDBDBD);
-  static const line = Color(0xFFE6E6E6);
-  static const danger = Color(0xFFD93025);
-
+  /// The only decorative colour: the AI gradient on Ask-AI surfaces.
   static const aiGradient = LinearGradient(colors: [
     Color(0xFF8B5CF6),
     Color(0xFF3B82F6),
@@ -21,44 +12,160 @@ abstract final class Palette {
   ]);
 }
 
+/// Monochrome, paper-like palette (light) and its inverse (dark). Read it with
+/// `context.colors`; it follows the active [Theme].
+@immutable
+class AppColors extends ThemeExtension<AppColors> {
+  final Color ground; // page background
+  final Color surface; // cards, sheets, bottom bar
+  final Color fill; // grey pills, play button
+  final Color text; // primary ink
+  final Color inverse; // content drawn on top of [text]-coloured surfaces
+  final Color muted;
+  final Color faint;
+  final Color line;
+  final Color danger;
+  final Color dangerContainer;
+  final Color onDangerContainer;
+
+  const AppColors({
+    required this.ground,
+    required this.surface,
+    required this.fill,
+    required this.text,
+    required this.inverse,
+    required this.muted,
+    required this.faint,
+    required this.line,
+    required this.danger,
+    required this.dangerContainer,
+    required this.onDangerContainer,
+  });
+
+  static const light = AppColors(
+    ground: Color(0xFFF8F8F8),
+    surface: Color(0xFFFFFFFF),
+    fill: Color(0xFFEDEDED),
+    text: Color(0xFF111111),
+    inverse: Color(0xFFFFFFFF),
+    muted: Color(0xFF8E8E8E),
+    faint: Color(0xFFBDBDBD),
+    line: Color(0xFFE6E6E6),
+    danger: Color(0xFFD93025),
+    dangerContainer: Color(0xFFFDECEA),
+    onDangerContainer: Color(0xFF8C1D18),
+  );
+
+  static const dark = AppColors(
+    ground: Color(0xFF0F0F0F),
+    surface: Color(0xFF1B1B1B),
+    fill: Color(0xFF2A2A2A),
+    text: Color(0xFFF2F2F2),
+    inverse: Color(0xFF111111),
+    muted: Color(0xFF9A9A9A),
+    faint: Color(0xFF5C5C5C),
+    line: Color(0xFF2E2E2E),
+    danger: Color(0xFFFF6B60),
+    dangerContainer: Color(0xFF3A1B18),
+    onDangerContainer: Color(0xFFFFB4AB),
+  );
+
+  @override
+  AppColors copyWith({
+    Color? ground,
+    Color? surface,
+    Color? fill,
+    Color? text,
+    Color? inverse,
+    Color? muted,
+    Color? faint,
+    Color? line,
+    Color? danger,
+    Color? dangerContainer,
+    Color? onDangerContainer,
+  }) =>
+      AppColors(
+        ground: ground ?? this.ground,
+        surface: surface ?? this.surface,
+        fill: fill ?? this.fill,
+        text: text ?? this.text,
+        inverse: inverse ?? this.inverse,
+        muted: muted ?? this.muted,
+        faint: faint ?? this.faint,
+        line: line ?? this.line,
+        danger: danger ?? this.danger,
+        dangerContainer: dangerContainer ?? this.dangerContainer,
+        onDangerContainer: onDangerContainer ?? this.onDangerContainer,
+      );
+
+  @override
+  AppColors lerp(ThemeExtension<AppColors>? other, double t) {
+    if (other is! AppColors) return this;
+    Color l(Color a, Color b) => Color.lerp(a, b, t)!;
+    return AppColors(
+      ground: l(ground, other.ground),
+      surface: l(surface, other.surface),
+      fill: l(fill, other.fill),
+      text: l(text, other.text),
+      inverse: l(inverse, other.inverse),
+      muted: l(muted, other.muted),
+      faint: l(faint, other.faint),
+      line: l(line, other.line),
+      danger: l(danger, other.danger),
+      dangerContainer: l(dangerContainer, other.dangerContainer),
+      onDangerContainer: l(onDangerContainer, other.onDangerContainer),
+    );
+  }
+}
+
+extension AppColorsContext on BuildContext {
+  AppColors get colors => Theme.of(this).extension<AppColors>()!;
+}
+
 /// Page padding used across screens.
 const pagePadding = EdgeInsets.symmetric(horizontal: 24);
 
-ThemeData buildTheme() {
-  const scheme = ColorScheme.light(
-    primary: Palette.text,
-    onPrimary: Colors.white,
-    secondary: Palette.text,
-    onSecondary: Colors.white,
-    surface: Palette.ground,
-    onSurface: Palette.text,
-    onSurfaceVariant: Palette.muted,
-    surfaceContainerLowest: Palette.surface,
-    surfaceContainerLow: Palette.surface,
-    surfaceContainer: Palette.surface,
-    surfaceContainerHigh: Palette.fill,
-    surfaceContainerHighest: Palette.fill,
-    primaryContainer: Palette.fill,
-    onPrimaryContainer: Palette.text,
-    outline: Palette.muted,
-    outlineVariant: Palette.line,
-    error: Palette.danger,
-    errorContainer: Color(0xFFFDECEA),
-    onErrorContainer: Color(0xFF8C1D18),
+ThemeData buildTheme(Brightness brightness) {
+  final c = brightness == Brightness.dark ? AppColors.dark : AppColors.light;
+  final isDark = brightness == Brightness.dark;
+
+  final scheme = (isDark ? const ColorScheme.dark() : const ColorScheme.light())
+      .copyWith(
+    primary: c.text,
+    onPrimary: c.inverse,
+    secondary: c.text,
+    onSecondary: c.inverse,
+    surface: c.ground,
+    onSurface: c.text,
+    onSurfaceVariant: c.muted,
+    surfaceContainerLowest: c.surface,
+    surfaceContainerLow: c.surface,
+    surfaceContainer: c.surface,
+    surfaceContainerHigh: c.fill,
+    surfaceContainerHighest: c.fill,
+    primaryContainer: c.fill,
+    onPrimaryContainer: c.text,
+    outline: c.muted,
+    outlineVariant: c.line,
+    error: c.danger,
+    errorContainer: c.dangerContainer,
+    onErrorContainer: c.onDangerContainer,
   );
 
   final base = ThemeData(
     useMaterial3: true,
     colorScheme: scheme,
-    scaffoldBackgroundColor: Palette.ground,
+    scaffoldBackgroundColor: c.ground,
     splashFactory: InkSparkle.splashFactory,
+    extensions: [c],
     actionIconTheme: ActionIconThemeData(
       backButtonIconBuilder: (_) =>
           const Icon(Icons.arrow_back_ios_new, size: 22),
     ),
   );
-  final text = base.textTheme.apply(bodyColor: Palette.text, displayColor: Palette.text);
+  final text = base.textTheme.apply(bodyColor: c.text, displayColor: c.text);
   final pill = RoundedRectangleBorder(borderRadius: BorderRadius.circular(999));
+  final iconBrightness = isDark ? Brightness.light : Brightness.dark;
 
   return base.copyWith(
     textTheme: text.copyWith(
@@ -71,39 +178,40 @@ ThemeData buildTheme() {
       titleLarge: text.titleLarge?.copyWith(fontWeight: FontWeight.w700),
       bodyLarge: text.bodyLarge?.copyWith(fontSize: 17, height: 1.5),
     ),
-    appBarTheme: const AppBarTheme(
-      backgroundColor: Palette.ground,
-      foregroundColor: Palette.text,
+    appBarTheme: AppBarTheme(
+      backgroundColor: c.ground,
+      foregroundColor: c.text,
       surfaceTintColor: Colors.transparent,
       elevation: 0,
       scrolledUnderElevation: 0,
       centerTitle: true,
       systemOverlayStyle: SystemUiOverlayStyle(
         statusBarColor: Colors.transparent,
-        statusBarIconBrightness: Brightness.dark,
-        systemNavigationBarColor: Palette.surface,
-        systemNavigationBarIconBrightness: Brightness.dark,
+        statusBarIconBrightness: iconBrightness,
+        systemNavigationBarColor: c.surface,
+        systemNavigationBarIconBrightness: iconBrightness,
       ),
-      titleTextStyle: TextStyle(
-          color: Palette.text, fontSize: 18, fontWeight: FontWeight.w600),
+      titleTextStyle:
+          TextStyle(color: c.text, fontSize: 18, fontWeight: FontWeight.w600),
     ),
-    tabBarTheme: const TabBarThemeData(
-      labelColor: Palette.text,
-      unselectedLabelColor: Palette.muted,
-      labelStyle: TextStyle(fontSize: 18, fontWeight: FontWeight.w700),
-      unselectedLabelStyle: TextStyle(fontSize: 18, fontWeight: FontWeight.w400),
+    tabBarTheme: TabBarThemeData(
+      labelColor: c.text,
+      unselectedLabelColor: c.muted,
+      labelStyle: const TextStyle(fontSize: 18, fontWeight: FontWeight.w700),
+      unselectedLabelStyle:
+          const TextStyle(fontSize: 18, fontWeight: FontWeight.w400),
       indicatorSize: TabBarIndicatorSize.label,
       indicator: UnderlineTabIndicator(
-          borderSide: BorderSide(color: Palette.text, width: 2.5)),
+          borderSide: BorderSide(color: c.text, width: 2.5)),
       dividerColor: Colors.transparent,
-      overlayColor: WidgetStatePropertyAll(Colors.transparent),
+      overlayColor: const WidgetStatePropertyAll(Colors.transparent),
       tabAlignment: TabAlignment.center,
     ),
-    dividerTheme: const DividerThemeData(color: Palette.line, thickness: 1),
+    dividerTheme: DividerThemeData(color: c.line, thickness: 1),
     filledButtonTheme: FilledButtonThemeData(
       style: FilledButton.styleFrom(
-        backgroundColor: Palette.text,
-        foregroundColor: Colors.white,
+        backgroundColor: c.text,
+        foregroundColor: c.inverse,
         shape: pill,
         padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 14),
         textStyle: const TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
@@ -111,100 +219,109 @@ ThemeData buildTheme() {
     ),
     outlinedButtonTheme: OutlinedButtonThemeData(
       style: OutlinedButton.styleFrom(
-        foregroundColor: Palette.text,
-        side: const BorderSide(color: Palette.faint),
+        foregroundColor: c.text,
+        side: BorderSide(color: c.faint),
         shape: pill,
         padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 14),
       ),
     ),
     textButtonTheme: TextButtonThemeData(
-      style: TextButton.styleFrom(foregroundColor: Palette.text),
+      style: TextButton.styleFrom(foregroundColor: c.text),
     ),
     iconButtonTheme: IconButtonThemeData(
-      style: IconButton.styleFrom(foregroundColor: Palette.text),
+      style: IconButton.styleFrom(foregroundColor: c.text),
     ),
     cardTheme: CardThemeData(
-      color: Palette.surface,
+      color: c.surface,
       elevation: 0,
       margin: const EdgeInsets.only(bottom: 12),
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(14),
-        side: const BorderSide(color: Palette.line),
+        side: BorderSide(color: c.line),
       ),
     ),
-    listTileTheme: const ListTileThemeData(
-      iconColor: Palette.text,
-      subtitleTextStyle: TextStyle(color: Palette.muted, fontSize: 14),
+    listTileTheme: ListTileThemeData(
+      iconColor: c.text,
+      subtitleTextStyle: TextStyle(color: c.muted, fontSize: 14),
     ),
     inputDecorationTheme: InputDecorationTheme(
       filled: true,
-      fillColor: Palette.surface,
+      fillColor: c.surface,
       border: OutlineInputBorder(
         borderRadius: BorderRadius.circular(12),
-        borderSide: const BorderSide(color: Palette.line),
+        borderSide: BorderSide(color: c.line),
       ),
       enabledBorder: OutlineInputBorder(
         borderRadius: BorderRadius.circular(12),
-        borderSide: const BorderSide(color: Palette.line),
+        borderSide: BorderSide(color: c.line),
       ),
       focusedBorder: OutlineInputBorder(
         borderRadius: BorderRadius.circular(12),
-        borderSide: const BorderSide(color: Palette.text, width: 1.5),
+        borderSide: BorderSide(color: c.text, width: 1.5),
       ),
-      labelStyle: const TextStyle(color: Palette.muted),
-      floatingLabelStyle: const TextStyle(color: Palette.text),
-      hintStyle: const TextStyle(color: Palette.faint),
+      labelStyle: TextStyle(color: c.muted),
+      floatingLabelStyle: TextStyle(color: c.text),
+      hintStyle: TextStyle(color: c.faint),
     ),
-    progressIndicatorTheme: const ProgressIndicatorThemeData(
-      color: Palette.text,
-      linearTrackColor: Palette.line,
+    progressIndicatorTheme: ProgressIndicatorThemeData(
+      color: c.text,
+      linearTrackColor: c.line,
       circularTrackColor: Colors.transparent,
     ),
-    sliderTheme: const SliderThemeData(
-      activeTrackColor: Palette.text,
-      inactiveTrackColor: Palette.line,
-      thumbColor: Palette.text,
-      overlayColor: Color(0x14000000),
+    sliderTheme: SliderThemeData(
+      activeTrackColor: c.text,
+      inactiveTrackColor: c.line,
+      thumbColor: c.text,
+      overlayColor: c.text.withValues(alpha: 0.08),
       trackHeight: 2,
-      thumbShape: RoundSliderThumbShape(enabledThumbRadius: 6),
+      thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 6),
     ),
     switchTheme: SwitchThemeData(
       thumbColor: WidgetStateProperty.resolveWith(
-          (s) => s.contains(WidgetState.selected) ? Colors.white : Palette.muted),
+          (s) => s.contains(WidgetState.selected) ? c.inverse : c.muted),
       trackColor: WidgetStateProperty.resolveWith(
-          (s) => s.contains(WidgetState.selected) ? Palette.text : Palette.fill),
+          (s) => s.contains(WidgetState.selected) ? c.text : c.fill),
       trackOutlineColor: const WidgetStatePropertyAll(Colors.transparent),
     ),
-    radioTheme: const RadioThemeData(fillColor: WidgetStatePropertyAll(Palette.text)),
-    chipTheme: const ChipThemeData(
-      backgroundColor: Palette.fill,
+    radioTheme: RadioThemeData(fillColor: WidgetStatePropertyAll(c.text)),
+    segmentedButtonTheme: SegmentedButtonThemeData(
+      style: ButtonStyle(
+        backgroundColor: WidgetStateProperty.resolveWith((s) =>
+            s.contains(WidgetState.selected) ? c.text : Colors.transparent),
+        foregroundColor: WidgetStateProperty.resolveWith((s) =>
+            s.contains(WidgetState.selected) ? c.inverse : c.text),
+        side: WidgetStatePropertyAll(BorderSide(color: c.faint)),
+      ),
+    ),
+    chipTheme: ChipThemeData(
+      backgroundColor: c.fill,
       side: BorderSide.none,
-      labelStyle: TextStyle(color: Palette.text, fontSize: 13),
+      labelStyle: TextStyle(color: c.text, fontSize: 13),
     ),
     snackBarTheme: SnackBarThemeData(
-      backgroundColor: Palette.text,
-      contentTextStyle: const TextStyle(color: Colors.white),
+      backgroundColor: c.text,
+      contentTextStyle: TextStyle(color: c.inverse),
       behavior: SnackBarBehavior.floating,
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
     ),
-    bottomSheetTheme: const BottomSheetThemeData(
-      backgroundColor: Palette.surface,
+    bottomSheetTheme: BottomSheetThemeData(
+      backgroundColor: c.surface,
       surfaceTintColor: Colors.transparent,
-      dragHandleColor: Palette.faint,
+      dragHandleColor: c.faint,
     ),
-    dialogTheme: const DialogThemeData(
-      backgroundColor: Palette.surface,
-      surfaceTintColor: Colors.transparent,
-    ),
-    popupMenuTheme: const PopupMenuThemeData(
-      color: Palette.surface,
+    dialogTheme: DialogThemeData(
+      backgroundColor: c.surface,
       surfaceTintColor: Colors.transparent,
     ),
-    expansionTileTheme: const ExpansionTileThemeData(
-      shape: Border(),
-      collapsedShape: Border(),
-      iconColor: Palette.text,
-      collapsedIconColor: Palette.muted,
+    popupMenuTheme: PopupMenuThemeData(
+      color: c.surface,
+      surfaceTintColor: Colors.transparent,
+    ),
+    expansionTileTheme: ExpansionTileThemeData(
+      shape: const Border(),
+      collapsedShape: const Border(),
+      iconColor: c.text,
+      collapsedIconColor: c.muted,
     ),
   );
 }
@@ -230,7 +347,8 @@ class PageHeader extends StatelessWidget {
           Text(title, style: t.displayMedium),
           if (subtitle != null) ...[
             const SizedBox(height: 4),
-            Text(subtitle!, style: t.bodyMedium?.copyWith(color: Palette.muted)),
+            Text(subtitle!,
+                style: t.bodyMedium?.copyWith(color: context.colors.muted)),
           ],
         ],
       ),
@@ -255,7 +373,7 @@ class GradientBorder extends StatelessWidget {
         padding: const EdgeInsets.all(1.5),
         child: DecoratedBox(
           decoration: BoxDecoration(
-            color: Palette.surface,
+            color: context.colors.surface,
             borderRadius: BorderRadius.circular(radius - 1.5),
           ),
           child: child,

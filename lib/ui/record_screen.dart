@@ -192,8 +192,9 @@ class _RecordScreenState extends State<RecordScreen> {
                       Container(
                         width: 8,
                         height: 8,
-                        decoration: const BoxDecoration(
-                            color: Palette.danger, shape: BoxShape.circle),
+                        decoration: BoxDecoration(
+                            color: context.colors.danger,
+                            shape: BoxShape.circle),
                       ),
                       const SizedBox(width: 8),
                     ],
@@ -201,7 +202,7 @@ class _RecordScreenState extends State<RecordScreen> {
                       !_recording
                           ? 'Phone microphone'
                           : 'Keeps recording with the screen off',
-                      style: const TextStyle(color: Palette.muted, fontSize: 15),
+                      style: TextStyle(color: context.colors.muted, fontSize: 15),
                     ),
                   ],
                 ),
@@ -223,7 +224,7 @@ class _RecordScreenState extends State<RecordScreen> {
                     painter: _WaveformPainter(
                       levels: _levels,
                       slots: _maxLevels,
-                      color: _paused ? Palette.faint : Palette.text,
+                      color: _paused ? context.colors.faint : context.colors.text,
                     ),
                   ),
                 ),
@@ -248,7 +249,7 @@ class _RecordScreenState extends State<RecordScreen> {
                         tooltip: 'Discard',
                         iconSize: 28,
                         style: IconButton.styleFrom(
-                          backgroundColor: Palette.fill,
+                          backgroundColor: context.colors.fill,
                           fixedSize: const Size(60, 60),
                         ),
                         onPressed: _confirmDiscard,
@@ -263,7 +264,7 @@ class _RecordScreenState extends State<RecordScreen> {
                         tooltip: _paused ? 'Resume' : 'Pause',
                         iconSize: 28,
                         style: IconButton.styleFrom(
-                          backgroundColor: Palette.fill,
+                          backgroundColor: context.colors.fill,
                           fixedSize: const Size(60, 60),
                         ),
                         onPressed: _togglePause,
@@ -312,7 +313,7 @@ class _RoundButton extends StatelessWidget {
     return Tooltip(
       message: tooltip,
       child: Material(
-        color: Palette.text,
+        color: context.colors.text,
         shape: const CircleBorder(),
         clipBehavior: Clip.antiAlias,
         child: InkWell(
@@ -320,7 +321,7 @@ class _RoundButton extends StatelessWidget {
           child: SizedBox(
             width: 88,
             height: 88,
-            child: Icon(icon, color: Colors.white, size: 40),
+            child: Icon(icon, color: context.colors.inverse, size: 40),
           ),
         ),
       ),
