@@ -190,27 +190,17 @@ class _PlaudDevicesScreenState extends State<PlaudDevicesScreen> {
     }
   }
 
-  /// Pull a device serial out of the manufacturer data. The Plaud advert
-  /// carries the model (first 3 digits) + serial as ASCII hex; find the 18-hex
-  /// run (`888…` / `881…`) and return it uppercased.
+  /// Pull a device serial out of the manufacturer data. It's 9 raw binary
+  /// bytes at a fixed offset (bytes 11-19), not ASCII text — hex-encode them
+  /// directly. See `PlaudDevice._serialIn` for the live capture that proved
+  /// this offset.
   String? _serialIn(Uint8List data) {
-    if (data.isEmpty) return null;
+    if (data.length < 20) return null;
     final sb = StringBuffer();
-    for (final b in data) {
-      final c = b & 0xff;
-      if (c >= 32 && c < 127) sb.writeCharCode(c);
+    for (var i = 11; i < 20; i++) {
+      sb.write(data[i].toRadixString(16).padLeft(2, '0'));
     }
-    final runs = RegExp(r'[0-9A-Fa-f]+')
-        .allMatches(sb.toString())
-        .map((m) => m.group(0)!)
-        .toList();
-    for (final r in runs) {
-      if (r.length == 18) return r.toUpperCase();
-    }
-    for (final r in runs) {
-      if (r.length >= 16 && r.length <= 20) return r.toUpperCase();
-    }
-    return null;
+    return sb.toString().toUpperCase();
   }
 
   @override

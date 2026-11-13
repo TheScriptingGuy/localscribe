@@ -84,27 +84,20 @@ class PlaudDeviceSession extends ChangeNotifier {
   }
 
   /// Pull a device serial out of the manufacturer data (same extraction as
-  /// `PlaudDevicesScreen._serialIn`): the advert carries the model (first 3
-  /// digits) + serial as ASCII hex; find the 18-hex run and return it
-  /// uppercased.
+  /// `PlaudDevicesScreen._serialIn`). The serial is NOT ASCII text — it's 9
+  /// raw binary bytes at a fixed offset (captured live: bytes 11-19 of
+  /// `590002780304560802020988831804767178688b14000494433b0b0101` hex-encode
+  /// to `88831804767178688B`, matching the enrolled credential's serial).
+  /// Hex-encode those bytes directly rather than filtering for printable
+  /// ASCII first — that filter drops nearly every byte here (most are < 0x20)
+  /// and is why extraction always logged `serial=?` on real hardware.
   String? _serialIn(Uint8List data) {
-    if (data.isEmpty) return null;
+    if (data.length < 20) return null;
     final sb = StringBuffer();
-    for (final b in data) {
-      final c = b & 0xff;
-      if (c >= 32 && c < 127) sb.writeCharCode(c);
+    for (var i = 11; i < 20; i++) {
+      sb.write(data[i].toRadixString(16).padLeft(2, '0'));
     }
-    final runs = RegExp(r'[0-9A-Fa-f]+')
-        .allMatches(sb.toString())
-        .map((m) => m.group(0)!)
-        .toList();
-    for (final r in runs) {
-      if (r.length == 18) return r.toUpperCase();
-    }
-    for (final r in runs) {
-      if (r.length >= 16 && r.length <= 20) return r.toUpperCase();
-    }
-    return null;
+    return sb.toString().toUpperCase();
   }
 
   /// [targetSerial]: when set, two Notes nearby could otherwise answer the
