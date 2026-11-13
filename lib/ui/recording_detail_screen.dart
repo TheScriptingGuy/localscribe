@@ -624,11 +624,62 @@ class _PlayerBar extends StatelessWidget {
   final Duration fallbackDuration;
   const _PlayerBar({required this.player, required this.fallbackDuration});
 
+  static const _speeds = [1.0, 1.25, 1.5, 2.0, 0.75];
+
+  Future<void> _skip(Duration by) async {
+    final total = player.duration ?? fallbackDuration;
+    var to = player.position + by;
+    if (to < Duration.zero) to = Duration.zero;
+    if (to > total) to = total;
+    await player.seek(to);
+  }
+
+  static String _speedLabel(double v) =>
+      v == v.roundToDouble() ? '${v.toInt()}×' : '$v×';
+
   @override
   Widget build(BuildContext context) {
     return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 16),
-      child: Row(
+      padding: const EdgeInsets.only(top: 16, bottom: 4),
+      child: Column(children: [
+        _mainRow(context),
+        Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            IconButton(
+              tooltip: 'Back 10 seconds',
+              icon: const Icon(Icons.replay_10),
+              onPressed: () => _skip(const Duration(seconds: -10)),
+            ),
+            const SizedBox(width: 16),
+            IconButton(
+              tooltip: 'Forward 10 seconds',
+              icon: const Icon(Icons.forward_10),
+              onPressed: () => _skip(const Duration(seconds: 10)),
+            ),
+            const SizedBox(width: 16),
+            StreamBuilder<double>(
+              stream: player.speedStream,
+              initialData: player.speed,
+              builder: (_, snap) {
+                final speed = snap.data ?? 1.0;
+                return TextButton(
+                  onPressed: () {
+                    final i = _speeds.indexOf(speed);
+                    player.setSpeed(_speeds[(i + 1) % _speeds.length]);
+                  },
+                  child: Text('Speed ${_speedLabel(speed)}'),
+                );
+              },
+            ),
+          ],
+        ),
+      ]),
+    );
+  }
+
+  Widget _mainRow(BuildContext context) {
+    return Row(
         children: [
           StreamBuilder<PlayerState>(
             stream: player.playerStateStream,
@@ -666,7 +717,6 @@ class _PlayerBar extends StatelessWidget {
             ),
           ),
         ],
-      ),
     );
   }
 
