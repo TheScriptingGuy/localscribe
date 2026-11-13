@@ -295,8 +295,12 @@ ThemeData buildTheme(Brightness brightness) {
     ),
     chipTheme: ChipThemeData(
       backgroundColor: c.fill,
+      selectedColor: c.text,
+      checkmarkColor: c.inverse,
       side: BorderSide.none,
-      labelStyle: TextStyle(color: c.text, fontSize: 13),
+      labelStyle: WidgetStateTextStyle.resolveWith((s) => TextStyle(
+          color: s.contains(WidgetState.selected) ? c.inverse : c.text,
+          fontSize: 13)),
     ),
     snackBarTheme: SnackBarThemeData(
       backgroundColor: c.text,
