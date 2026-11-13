@@ -12,6 +12,7 @@ import '../templates/prompt_builder.dart';
 import '../templates/template_repository.dart';
 import 'auto_template.dart';
 import 'note_generator.dart';
+import 'note_title.dart';
 
 class _NoteJob {
   double? progress; // null until the generator reports any
@@ -121,13 +122,11 @@ class NoteJobs extends ChangeNotifier {
           auto: auto,
         ),
       );
-      // Adopt the note's title for recordings that still have a default name.
-      if (rec.title.startsWith('Recording ')) {
-        final heading = RegExp(r'^#\s+(.+)$', multiLine: true)
-            .firstMatch(content)
-            ?.group(1)
-            ?.trim();
-        if (heading != null && heading.isNotEmpty) rec.title = heading;
+      // Like Plaud: name the recording after what it is about, while it still
+      // has a generated name (never overwrite a title the user chose).
+      if (isAutoTitle(rec.title)) {
+        final title = titleFromNote(content);
+        if (title != null) rec.title = title;
       }
       await store.save(rec);
       await templates.markUsed(template.id);
