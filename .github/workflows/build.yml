@@ -50,6 +50,24 @@ jobs:
           sed -i 's/compileSdk = flutter.compileSdkVersion/compileSdk = 37/' android/app/build.gradle.kts || true
           yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "platforms;android-37" >/dev/null 2>&1 || true
 
+      - name: Disable lintVital (crashes on this runner's AGP/lint/JDK combo)
+        # AGP runs a "lint vital" analysis pass on every release build of every
+        # library module (e.g. reactive_ble_mobile), separate from and in
+        # addition to `flutter analyze`. The bundled lint tool itself crashes
+        # here (NoSuchMethodError: List.removeLast(), a known lint/Kotlin
+        # runtime-version mismatch) — unrelated to our source, unfixable from
+        # app code, so just turn the task off everywhere.
+        run: |
+          cat >> android/build.gradle <<'EOF'
+          subprojects {
+              tasks.whenTaskAdded { task ->
+                  if (task.name.startsWith('lintVital')) {
+                      task.enabled = false
+                  }
+              }
+          }
+          EOF
+
       - name: Release signing
         # A fixed key so each build can update the previous install. Skipped
         # (debug signing) when the secrets are absent, e.g. on forks.
