@@ -1,0 +1,31 @@
+{
+  "id": "retrospective",
+  "name": "Retrospective",
+  "description": "What went well, what did not, and the improvements the team agreed on.",
+  "verbatim": false,
+  "source": "Original LocalScribe template.",
+  "category": "meeting",
+  "icon": "refresh",
+  "tags": [
+    "retro",
+    "retrospective",
+    "sprint",
+    "agile",
+    "lessons learned",
+    "improvement"
+  ],
+  "outline": [
+    "Sort what was said into what went well, what did not go well, and ideas to improve.",
+    "Merge points that say the same thing and keep the wording of the team.",
+    "Turn the agreed improvements into actions with an owner and a date where given.",
+    "Note recurring themes if the same issue was raised more than once.",
+    "Keep it factual: never add information that is not in the transcript, and omit a section when nothing applies."
+  ],
+  "sections": [
+    "Went Well",
+    "Did Not Go Well",
+    "Ideas",
+    "Actions"
+  ],
+  "example": "## Went Well\n- Releases were smooth\n\n## Actions\n- [ ] Add a release checklist (Dana)"
+}

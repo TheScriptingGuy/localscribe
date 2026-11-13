@@ -1,0 +1,32 @@
+{
+  "id": "executive_brief",
+  "name": "Executive Brief",
+  "description": "A tight, decision-oriented brief for someone who has two minutes.",
+  "verbatim": false,
+  "source": "Original LocalScribe template.",
+  "category": "general",
+  "icon": "star",
+  "tags": [
+    "executive",
+    "brief",
+    "leadership",
+    "decisions",
+    "management"
+  ],
+  "outline": [
+    "Write for a busy reader who was not present: lead with the conclusion or the ask.",
+    "Give at most five bullet points of background, each one line.",
+    "State the decisions made and the decisions still needed, separately.",
+    "List risks or blockers briefly, with who is affected.",
+    "End with the single most important next step and its owner if one was named.",
+    "Keep it factual: never add information that is not in the transcript, and omit a section when nothing applies."
+  ],
+  "sections": [
+    "Bottom Line",
+    "Background",
+    "Decisions",
+    "Risks",
+    "Next Step"
+  ],
+  "example": "## Bottom Line\nApprove the vendor switch by Friday or the launch slips.\n\n## Next Step\nFinance signs off (Priya)."
+}

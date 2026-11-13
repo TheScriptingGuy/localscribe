@@ -15,5 +15,14 @@
     "Overview",
     "Key Points",
     "Open Questions"
-  ]
+  ],
+  "category": "general",
+  "icon": "summary",
+  "tags": [
+    "summary",
+    "overview",
+    "recap",
+    "tldr"
+  ],
+  "example": "## Overview\nA short account of what was discussed and what came out of it.\n\n## Key Points\n- The most important points, in a logical order"
 }

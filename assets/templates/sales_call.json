@@ -1,0 +1,34 @@
+{
+  "id": "sales_call",
+  "name": "Sales Call",
+  "description": "Customer needs, objections, buying signals and the agreed next step.",
+  "verbatim": false,
+  "source": "Original LocalScribe template.",
+  "category": "call",
+  "icon": "sales",
+  "tags": [
+    "sales",
+    "prospect",
+    "customer",
+    "deal",
+    "pipeline",
+    "objections",
+    "crm"
+  ],
+  "outline": [
+    "Summarize who the prospect is and why they were talking to us, as far as stated.",
+    "List the needs and pain points the customer described, in their own words where possible.",
+    "List objections or concerns and how they were answered.",
+    "Note buying signals, budget, timeline and who decides, if mentioned.",
+    "End with the agreed next step, its owner and date.",
+    "Keep it factual: never add information that is not in the transcript, and omit a section when nothing applies."
+  ],
+  "sections": [
+    "Prospect",
+    "Needs",
+    "Objections",
+    "Buying Signals",
+    "Next Step"
+  ],
+  "example": "## Needs\n- Wants to cut manual reporting\n\n## Next Step\nSend the proposal by Thursday (Lena)."
+}

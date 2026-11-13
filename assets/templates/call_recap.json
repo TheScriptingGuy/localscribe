@@ -1,0 +1,30 @@
+{
+  "id": "call_recap",
+  "name": "Call Recap",
+  "description": "A short recap of any phone call with the points and promises that matter.",
+  "verbatim": false,
+  "source": "Original LocalScribe template.",
+  "category": "call",
+  "icon": "phone",
+  "tags": [
+    "phone",
+    "call",
+    "recap",
+    "follow-up",
+    "conference call"
+  ],
+  "outline": [
+    "Open with who was on the call and its purpose, if stated.",
+    "Summarize the main points in a handful of bullets.",
+    "List promises, commitments and deadlines, with who made them.",
+    "Close with the follow-ups that are still to do.",
+    "Keep it factual: never add information that is not in the transcript, and omit a section when nothing applies."
+  ],
+  "sections": [
+    "Purpose",
+    "Main Points",
+    "Commitments",
+    "Follow-ups"
+  ],
+  "example": "## Main Points\n- Invoice 1042 is paid\n\n## Commitments\n- Send the contract by Monday (Omar)"
+}

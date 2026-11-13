@@ -1,0 +1,33 @@
+{
+  "id": "product_feedback",
+  "name": "Product Feedback",
+  "description": "Feedback on a product or feature: what works, what hurts, and requests.",
+  "verbatim": false,
+  "source": "Original LocalScribe template.",
+  "category": "work",
+  "icon": "star",
+  "tags": [
+    "feedback",
+    "product",
+    "feature request",
+    "customer",
+    "usability",
+    "bug"
+  ],
+  "outline": [
+    "Name the product or feature the feedback is about.",
+    "List what works well, each as a short bullet.",
+    "List problems, frustrations and bugs, with how severe the speaker made them sound.",
+    "List feature requests separately, worded as the need rather than the solution.",
+    "Quote one or two representative lines exactly.",
+    "Keep it factual: never add information that is not in the transcript, and omit a section when nothing applies."
+  ],
+  "sections": [
+    "Subject",
+    "Works Well",
+    "Problems",
+    "Requests",
+    "Quotes"
+  ],
+  "example": "## Problems\n- Export fails on large files (blocking)\n\n## Requests\n- Dark mode for night use"
+}

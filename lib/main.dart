@@ -115,7 +115,7 @@ class LocalScribeApp extends StatelessWidget {
     return MultiProvider(
       providers: [
         ChangeNotifierProvider.value(value: settings),
-        Provider.value(value: templates),
+        ChangeNotifierProvider.value(value: templates),
         ChangeNotifierProvider.value(value: recordings),
         ChangeNotifierProvider.value(value: models),
         ChangeNotifierProvider.value(value: speakerModels),

@@ -1,0 +1,34 @@
+{
+  "id": "project_kickoff",
+  "name": "Project Kick-off",
+  "description": "Goals, scope, roles, timeline and risks agreed at the start of a project.",
+  "verbatim": false,
+  "source": "Original LocalScribe template.",
+  "category": "meeting",
+  "icon": "rocket",
+  "tags": [
+    "kickoff",
+    "kick-off",
+    "project",
+    "scope",
+    "planning",
+    "stakeholders"
+  ],
+  "outline": [
+    "State the project goal and the problem it solves in a few sentences.",
+    "List what is in scope and what was explicitly left out of scope.",
+    "List the people and roles that were named, and who owns what.",
+    "Capture milestones, deadlines and the budget if they were mentioned.",
+    "List risks and open questions, and the first next steps with owners.",
+    "Keep it factual: never add information that is not in the transcript, and omit a section when nothing applies."
+  ],
+  "sections": [
+    "Goal",
+    "Scope",
+    "Roles",
+    "Timeline",
+    "Risks & Open Questions",
+    "Next Steps"
+  ],
+  "example": "## Goal\nReplace the booking flow before the summer season.\n\n## Timeline\n- Design done: 1 Apr\n- Launch: 15 Jun"
+}

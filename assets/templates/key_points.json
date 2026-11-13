@@ -15,5 +15,14 @@
     "Key Points",
     "Decisions",
     "Tasks"
-  ]
+  ],
+  "category": "general",
+  "icon": "list",
+  "tags": [
+    "decisions",
+    "tasks",
+    "essentials",
+    "highlights"
+  ],
+  "example": "## Key Points\n- Budget approved for Q3\n\n## Decisions\n- Launch moves to 12 May\n\n## Tasks\n- [ ] Send the plan to finance (Sam, Fri)"
 }

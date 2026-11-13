@@ -1,0 +1,27 @@
+{
+  "id": "qa_digest",
+  "name": "Q&A Digest",
+  "description": "Turn a conversation into the questions that were asked and the answers that were given.",
+  "verbatim": false,
+  "source": "Original LocalScribe template.",
+  "category": "general",
+  "icon": "question",
+  "tags": [
+    "questions",
+    "answers",
+    "faq",
+    "q&a"
+  ],
+  "outline": [
+    "Identify each distinct question raised in the transcript, whether asked directly or implied.",
+    "Pair every question with the answer that was given, in two or three sentences.",
+    "Mark questions that stayed unanswered as open.",
+    "Keep the questions in the order they came up and word them clearly and neutrally.",
+    "Keep it factual: never add information that is not in the transcript, and omit a section when nothing applies."
+  ],
+  "sections": [
+    "Questions & Answers",
+    "Still Open"
+  ],
+  "example": "**Q: When does the new version ship?**\nA: Planned for 12 May, pending the final test round.\n\n## Still Open\n- Who owns the migration?"
+}

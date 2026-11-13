@@ -87,11 +87,16 @@ class NoteJobs extends ChangeNotifier {
             .catchError((_) {});
       }
       final gen = AiFactory.noteGenerator(settings.noteAi, models: llmModels);
-      final auto = choice == autoTemplate;
-      final template = auto
-          ? await AutoTemplatePicker.pick(
-              generator: gen, templates: templates.all, transcript: transcript)
-          : templates.byId(choice);
+      // "Set for next use" replaces Auto when the user chose a default.
+      final fallback = choice == autoTemplate ? templates.defaultTemplate : null;
+      final auto = choice == autoTemplate && fallback == null;
+      final template = fallback ??
+          (auto
+              ? await AutoTemplatePicker.pick(
+                  generator: gen,
+                  templates: templates.all,
+                  transcript: transcript)
+              : templates.byId(choice));
       if (template == null) throw AiException('Template not found: $choice');
 
       final content = await gen.complete(
@@ -125,6 +130,7 @@ class NoteJobs extends ChangeNotifier {
         if (heading != null && heading.isNotEmpty) rec.title = heading;
       }
       await store.save(rec);
+      await templates.markUsed(template.id);
     } on AiException catch (e) {
       if (!e.cancelled) _errors[rec.id] = e.message;
     } catch (e) {

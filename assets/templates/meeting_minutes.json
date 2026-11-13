@@ -20,5 +20,14 @@
     "Action Items",
     "Deadlines",
     "Follow-ups"
-  ]
+  ],
+  "category": "meeting",
+  "icon": "groups",
+  "tags": [
+    "minutes",
+    "notes",
+    "actions",
+    "agenda"
+  ],
+  "example": "## Summary\nWeekly planning meeting.\n\n## Action Items\n| Task | Responsible | Deadline | Notes |\n|---|---|---|---|"
 }

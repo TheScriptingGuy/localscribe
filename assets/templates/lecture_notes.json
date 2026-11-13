@@ -1,0 +1,34 @@
+{
+  "id": "lecture_notes",
+  "name": "Lecture Notes",
+  "description": "Structured study notes: topics, definitions, examples and takeaways.",
+  "verbatim": false,
+  "source": "Original LocalScribe template.",
+  "category": "education",
+  "icon": "school",
+  "tags": [
+    "lecture",
+    "class",
+    "study",
+    "university",
+    "course",
+    "notes",
+    "student"
+  ],
+  "outline": [
+    "Give the lecture a short title that names its subject, as a level-one heading.",
+    "Organize the content under headings that follow the order of the lecture.",
+    "Write definitions and key terms in bold, followed by a one-line explanation.",
+    "Include examples, formulas or case studies the lecturer used.",
+    "End with the main takeaways and any homework, readings or exam hints that were mentioned.",
+    "Keep it factual: never add information that is not in the transcript, and omit a section when nothing applies."
+  ],
+  "sections": [
+    "Topics",
+    "Key Terms",
+    "Examples",
+    "Takeaways",
+    "Homework & Readings"
+  ],
+  "example": "# Photosynthesis\n## Key Terms\n- **Chlorophyll**: pigment that absorbs light\n\n## Takeaways\n- Light reactions feed the Calvin cycle"
+}

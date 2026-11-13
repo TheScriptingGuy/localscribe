@@ -14,5 +14,14 @@
   ],
   "sections": [
     "Tasks"
-  ]
+  ],
+  "category": "general",
+  "icon": "checklist",
+  "tags": [
+    "tasks",
+    "actions",
+    "checklist",
+    "todo"
+  ],
+  "example": "## Tasks\n- [ ] Book the venue (Anna, due: Friday)\n- [ ] Order catering"
 }

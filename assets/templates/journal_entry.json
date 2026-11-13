@@ -1,0 +1,31 @@
+{
+  "id": "journal_entry",
+  "name": "Journal Entry",
+  "description": "A reflective diary entry written in the first person from what you said.",
+  "verbatim": false,
+  "source": "Original LocalScribe template.",
+  "category": "personal",
+  "icon": "journal",
+  "tags": [
+    "journal",
+    "diary",
+    "reflection",
+    "gratitude",
+    "personal",
+    "mood"
+  ],
+  "outline": [
+    "Write the entry in the first person, in a warm and natural voice, as if the speaker wrote it themselves.",
+    "Follow the order of what was said and keep the speaker's own feelings and wording.",
+    "Pull out a short list of highlights and, if mentioned, things the speaker is grateful for.",
+    "Add a line for intentions or what to remember for tomorrow only if the speaker said so.",
+    "Do not add advice, interpretation or detail that was not said."
+  ],
+  "sections": [
+    "Entry",
+    "Highlights",
+    "Grateful For",
+    "Tomorrow"
+  ],
+  "example": "## Entry\nToday started slow, but the walk after lunch cleared my head.\n\n## Grateful For\n- A quiet afternoon"
+}

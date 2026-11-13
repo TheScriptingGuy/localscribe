@@ -1,0 +1,28 @@
+{
+  "id": "shopping_list",
+  "name": "Shopping List",
+  "description": "Items mentioned, grouped by where you would find them.",
+  "verbatim": false,
+  "source": "Original LocalScribe template.",
+  "category": "personal",
+  "icon": "cart",
+  "tags": [
+    "shopping",
+    "groceries",
+    "list",
+    "errands",
+    "store"
+  ],
+  "outline": [
+    "List every item that was mentioned as a '- [ ] ' checkbox with the quantity if given.",
+    "Group the items under store-section headings such as Produce, Dairy, Bakery, Household.",
+    "Merge duplicates and keep the language of the speaker.",
+    "Put non-shopping errands that were mentioned in a separate Errands list.",
+    "Do not add items that were not said."
+  ],
+  "sections": [
+    "Shopping",
+    "Errands"
+  ],
+  "example": "## Produce\n- [ ] 6 apples\n- [ ] spinach\n\n## Dairy\n- [ ] oat milk"
+}

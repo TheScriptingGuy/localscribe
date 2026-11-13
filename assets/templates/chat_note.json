@@ -17,5 +17,14 @@
     "Atmosphere",
     "Topics",
     "Agreements & Next Steps"
-  ]
+  ],
+  "category": "personal",
+  "icon": "chat",
+  "tags": [
+    "casual",
+    "conversation",
+    "friends",
+    "informal"
+  ],
+  "example": "## Summary\nA relaxed catch-up about holiday plans and a new job.\n\n## Topics\n- Where to go in August"
 }

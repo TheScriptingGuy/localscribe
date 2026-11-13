@@ -10,12 +10,12 @@ import '../services/library/recording_store.dart';
 import '../services/models/llm_models.dart';
 import '../services/notes/note_jobs.dart';
 import '../services/templates/prompt_builder.dart';
-import '../services/templates/template_repository.dart';
 import '../services/transcription/transcription_jobs.dart';
 import '../services/transcription/transcriber.dart' show CancelSignal;
 import '../settings/settings.dart';
 import 'format.dart';
 import 'markdown_view.dart';
+import 'template_picker.dart';
 import 'theme.dart';
 
 /// One recording: playback, transcript, generated notes and Ask-AI chat.
@@ -194,32 +194,7 @@ class _RecordingDetailScreenState extends State<RecordingDetailScreen> {
   }
 
   Future<void> _pickTemplate(Recording rec) async {
-    final templates = context.read<TemplateRepository>();
-    final choice = await showModalBottomSheet<String>(
-      context: context,
-      showDragHandle: true,
-      builder: (ctx) => SafeArea(
-        child: ListView(
-          shrinkWrap: true,
-          children: [
-            ListTile(
-              leading: const Icon(Icons.auto_awesome),
-              title: const Text('Auto'),
-              subtitle: const Text('Let the AI pick the best template'),
-              onTap: () => Navigator.pop(ctx, NoteJobs.autoTemplate),
-            ),
-            const Divider(),
-            ...templates.all.map((t) => ListTile(
-                  leading: const Icon(Icons.description_outlined),
-                  title: Text(t.name),
-                  subtitle: Text(t.description,
-                      maxLines: 1, overflow: TextOverflow.ellipsis),
-                  onTap: () => Navigator.pop(ctx, t.id),
-                )),
-          ],
-        ),
-      ),
-    );
+    final choice = await pickTemplate(context);
     if (choice != null && mounted) _generate(rec, choice);
   }
 

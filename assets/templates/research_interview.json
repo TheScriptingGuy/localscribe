@@ -1,0 +1,33 @@
+{
+  "id": "research_interview",
+  "name": "Research Interview",
+  "description": "Themes, quotes and insights from a user or research interview.",
+  "verbatim": false,
+  "source": "Original LocalScribe template.",
+  "category": "interview",
+  "icon": "mic",
+  "tags": [
+    "research",
+    "user interview",
+    "qualitative",
+    "insights",
+    "ux",
+    "themes"
+  ],
+  "outline": [
+    "State who was interviewed (by role, not by sensitive detail) and the goal of the interview if mentioned.",
+    "Group the insights into themes with a short heading each.",
+    "Support each theme with one or two verbatim quotes in quotation marks.",
+    "List pain points and unmet needs separately from positive feedback.",
+    "End with open questions worth exploring in the next interview.",
+    "Keep it factual: never add information that is not in the transcript, and omit a section when nothing applies."
+  ],
+  "sections": [
+    "Participant",
+    "Themes",
+    "Pain Points",
+    "Positives",
+    "Open Questions"
+  ],
+  "example": "## Themes\n### Onboarding feels long\n> \"I gave up at the third screen.\""
+}

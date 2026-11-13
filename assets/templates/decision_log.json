@@ -1,0 +1,28 @@
+{
+  "id": "decision_log",
+  "name": "Decision Log",
+  "description": "Every decision made, with the reasoning, alternatives and who decided.",
+  "verbatim": false,
+  "source": "Original LocalScribe template.",
+  "category": "meeting",
+  "icon": "gavel",
+  "tags": [
+    "decisions",
+    "log",
+    "rationale",
+    "adr",
+    "approval"
+  ],
+  "outline": [
+    "List each decision that was actually made, as a short statement in the past tense.",
+    "For every decision add the reasoning that was given, the alternatives that were considered, and who decided or approved.",
+    "Put proposals that were not decided in a separate Pending list.",
+    "Keep the decisions in chronological order.",
+    "Keep it factual: never add information that is not in the transcript, and omit a section when nothing applies."
+  ],
+  "sections": [
+    "Decisions",
+    "Pending"
+  ],
+  "example": "### Switch to vendor B\n- Why: 30% cheaper, same SLA\n- Alternatives: stay with vendor A\n- Decided by: Priya"
+}

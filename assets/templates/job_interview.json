@@ -1,0 +1,33 @@
+{
+  "id": "job_interview",
+  "name": "Job Interview Evaluation",
+  "description": "Candidate background, strengths, concerns and a fair, evidence-based assessment.",
+  "verbatim": false,
+  "source": "Original LocalScribe template.",
+  "category": "interview",
+  "icon": "person",
+  "tags": [
+    "hiring",
+    "recruiting",
+    "candidate",
+    "job interview",
+    "hr",
+    "evaluation"
+  ],
+  "outline": [
+    "Summarize the candidate's background and the role as discussed.",
+    "List strengths, each backed by something the candidate actually said.",
+    "List concerns or gaps, each backed by evidence from the conversation, and avoid speculation about personal traits.",
+    "Note questions the candidate asked and what they seem to care about.",
+    "Finish with a neutral summary of fit and suggested follow-up questions; do not make the hire decision.",
+    "Keep it factual: never add information that is not in the transcript, and omit a section when nothing applies."
+  ],
+  "sections": [
+    "Background",
+    "Strengths",
+    "Concerns",
+    "Candidate Questions",
+    "Assessment"
+  ],
+  "example": "## Strengths\n- Led a team of six through a cloud migration\n\n## Concerns\n- Limited experience with budgeting"
+}

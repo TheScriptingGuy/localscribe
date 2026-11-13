@@ -1,0 +1,32 @@
+{
+  "id": "support_call",
+  "name": "Support Call",
+  "description": "The problem, what was tried, the resolution and any follow-up owed to the customer.",
+  "verbatim": false,
+  "source": "Original LocalScribe template.",
+  "category": "call",
+  "icon": "support",
+  "tags": [
+    "support",
+    "helpdesk",
+    "ticket",
+    "customer service",
+    "issue",
+    "incident"
+  ],
+  "outline": [
+    "Describe the customer's problem in one or two sentences, including product and any error messages mentioned.",
+    "List the troubleshooting steps that were tried and what happened for each.",
+    "State the resolution, or say clearly that the issue is not resolved.",
+    "List follow-up actions owed to the customer or to another team, with owner and timing.",
+    "Note the customer's mood at the end only if it was clearly expressed.",
+    "Keep it factual: never add information that is not in the transcript, and omit a section when nothing applies."
+  ],
+  "sections": [
+    "Problem",
+    "Steps Tried",
+    "Resolution",
+    "Follow-up"
+  ],
+  "example": "## Problem\nApp crashes when exporting to PDF.\n\n## Resolution\nFixed by updating to version 2.4."
+}
