@@ -177,6 +177,9 @@ void debug_dump_wav(const char *pcm_path, int64_t samples) {
     if (!in) return;
     // App's own external-files dir needs no permission (scoped storage) and
     // is reachable via `adb pull` even though the app itself isn't debuggable.
+    // Nothing has called Context.getExternalFilesDir() yet, so the directory
+    // doesn't exist on disk -- create it ourselves.
+    mkdir("/storage/emulated/0/Android/data/ai.localscribe.localscribe/files", 0775);
     FILE *out = fopen(
         "/storage/emulated/0/Android/data/ai.localscribe.localscribe/files/ls_whisper_debug.wav",
         "wb");
