@@ -8,6 +8,7 @@ import 'docx_writer.dart';
 import 'export_types.dart';
 import 'markdown_blocks.dart';
 import 'pdf_writer.dart';
+import '../notes/highlights.dart';
 import 'transcript_paragraphs.dart';
 
 class TranscriptExportOptions {
@@ -69,6 +70,13 @@ String transcriptToTxt(Recording rec, TranscriptExportOptions o) {
       ..writeln('${_prefix(p, o)}${p.text}')
       ..writeln();
   }
+  final marks = highlightLines(rec);
+  if (marks.isNotEmpty) {
+    b.writeln('Highlights');
+    for (final m in marks) {
+      b.writeln('- $m');
+    }
+  }
   return '${b.toString().trimRight()}\n';
 }
 
@@ -111,6 +119,10 @@ List<MdBlock> transcriptBlocks(Recording rec, TranscriptExportOptions o) {
         if (_prefix(p, o).isNotEmpty) MdSpan(_prefix(p, o), bold: true),
         MdSpan(p.text),
       ]),
+    if (highlightLines(rec).isNotEmpty) ...[
+      MdHeading(2, [const MdSpan('Highlights')]),
+      for (final m in highlightLines(rec)) MdListItem('•', 0, [MdSpan(m)]),
+    ],
   ];
 }
 

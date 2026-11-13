@@ -14,6 +14,7 @@ import '../services/transcription/transcription_jobs.dart';
 import '../services/transcription/transcriber.dart' show CancelSignal;
 import '../settings/settings.dart';
 import '../services/export/transcript_paragraphs.dart';
+import 'detail/marker_list.dart';
 import 'detail/share_sheet.dart';
 import 'format.dart';
 import 'markdown_view.dart';
@@ -359,6 +360,13 @@ class _RecordingDetailScreenState extends State<RecordingDetailScreen> {
         const Divider(height: 1),
         _PlayerBar(player: _player, fallbackDuration: rec.duration),
         const Divider(height: 1),
+        MarkerList(
+          rec: rec,
+          onSeek: (m) {
+            _player.seek(Duration(milliseconds: m.atMs));
+            _player.play();
+          },
+        ),
         const SizedBox(height: 12),
         content,
       ],

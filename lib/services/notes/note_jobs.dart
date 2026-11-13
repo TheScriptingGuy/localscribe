@@ -11,6 +11,7 @@ import '../models/llm_models.dart';
 import '../templates/prompt_builder.dart';
 import '../templates/template_repository.dart';
 import 'auto_template.dart';
+import 'highlights.dart';
 import 'note_generator.dart';
 import 'note_title.dart';
 
@@ -105,6 +106,7 @@ class NoteJobs extends ChangeNotifier {
           template: template,
           transcript: transcript,
           languageHint: settings.noteLanguage,
+          highlights: highlightsContext(rec),
         ),
         onProgress: report,
         cancel: job.cancel,

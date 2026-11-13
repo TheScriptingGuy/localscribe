@@ -2,9 +2,12 @@ import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_foreground_task/flutter_foreground_task.dart';
+import 'package:image_picker/image_picker.dart';
 import 'package:provider/provider.dart';
 import 'package:record/record.dart';
+import 'package:uuid/uuid.dart';
 
 import '../models/recording.dart';
 import '../services/audio/recording_service.dart';
@@ -41,6 +44,11 @@ class _RecordScreenState extends State<RecordScreen> {
   final _levels = <double>[];
   static const _maxLevels = 64;
   String? _error;
+
+  /// Highlights, photos and notes marked so far; photos wait in temp files
+  /// until the recording is saved.
+  final _markers = <RecordingMarker>[];
+  final _photos = <String, File>{};
 
   @override
   void initState() {
@@ -114,6 +122,84 @@ class _RecordScreenState extends State<RecordScreen> {
     });
   }
 
+  RecordingMarker _newMarker(MarkerType type, {String? text}) =>
+      RecordingMarker(
+        id: const Uuid().v4(),
+        atMs: _elapsed.elapsedMilliseconds,
+        type: type,
+        text: text,
+      );
+
+  void _flag() {
+    HapticFeedback.mediumImpact();
+    setState(() => _markers.add(_newMarker(MarkerType.flag)));
+    ScaffoldMessenger.of(context)
+      ..hideCurrentSnackBar()
+      ..showSnackBar(SnackBar(
+          duration: const Duration(seconds: 2),
+          content: Text('Highlight marked at ${formatDuration(_elapsed.elapsed)}')));
+  }
+
+  Future<void> _photo() async {
+    // The time is the moment the button was pressed, not when the camera closes.
+    final marker = _newMarker(MarkerType.photo);
+    try {
+      final shot = await ImagePicker().pickImage(
+          source: ImageSource.camera, imageQuality: 85, maxWidth: 1920);
+      if (shot == null || !mounted) return;
+      setState(() {
+        _markers.add(marker);
+        _photos[marker.id] = File(shot.path);
+      });
+    } catch (e) {
+      if (mounted) setState(() => _error = 'Could not take a photo: $e');
+    }
+  }
+
+  Future<void> _note() async {
+    final marker = _newMarker(MarkerType.note);
+    final ctrl = TextEditingController();
+    final text = await showModalBottomSheet<String>(
+      context: context,
+      isScrollControlled: true,
+      showDragHandle: true,
+      builder: (ctx) => Padding(
+        padding: EdgeInsets.fromLTRB(
+            24, 0, 24, 24 + MediaQuery.viewInsetsOf(ctx).bottom),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text('Add a note at ${formatDuration(Duration(milliseconds: marker.atMs))}',
+                style: Theme.of(ctx).textTheme.titleLarge),
+            const SizedBox(height: 12),
+            TextField(
+              controller: ctrl,
+              autofocus: true,
+              minLines: 2,
+              maxLines: 5,
+              textCapitalization: TextCapitalization.sentences,
+              decoration: const InputDecoration(
+                  hintText: 'Key point, idea or reminder'),
+            ),
+            const SizedBox(height: 16),
+            Align(
+              alignment: Alignment.centerRight,
+              child: FilledButton(
+                onPressed: () => Navigator.pop(ctx, ctrl.text.trim()),
+                child: const Text('Add note'),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+    ctrl.dispose();
+    if (text == null || text.isEmpty || !mounted) return;
+    setState(() => _markers.add(RecordingMarker(
+        id: marker.id, atMs: marker.atMs, type: MarkerType.note, text: text)));
+  }
+
   Future<void> _togglePause() async {
     if (_paused) {
       await _recorder.resume();
@@ -148,6 +234,8 @@ class _RecordScreenState extends State<RecordScreen> {
       source: RecordingSource.mic,
       durationMs: _elapsed.elapsedMilliseconds,
       move: true,
+      markers: List.of(_markers)..sort((a, b) => a.atMs.compareTo(b.atMs)),
+      photos: Map.of(_photos),
     );
     navigator.pushReplacement(MaterialPageRoute(
         builder: (_) => RecordingDetailScreen(recordingId: rec.id)));
@@ -157,6 +245,11 @@ class _RecordScreenState extends State<RecordScreen> {
     _ticker?.cancel();
     await _ampSub?.cancel();
     await _recorder.cancel(); // stops and deletes the temp file
+    for (final f in _photos.values) {
+      try {
+        await f.delete();
+      } catch (_) {}
+    }
     await RecordingService.stop();
     if (mounted) Navigator.of(context).pop();
   }
@@ -228,6 +321,37 @@ class _RecordScreenState extends State<RecordScreen> {
                     ),
                   ),
                 ),
+                if (_recording) ...[
+                  const SizedBox(height: 24),
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                    children: [
+                      _MarkerButton(
+                          icon: Icons.flag_outlined,
+                          label: 'Highlight',
+                          onPressed: _flag),
+                      _MarkerButton(
+                          icon: Icons.photo_camera_outlined,
+                          label: 'Photo',
+                          onPressed: _photo),
+                      _MarkerButton(
+                          icon: Icons.edit_note,
+                          label: 'Note',
+                          onPressed: _note),
+                    ],
+                  ),
+                  if (_markers.isNotEmpty)
+                    Padding(
+                      padding: const EdgeInsets.only(top: 12),
+                      child: Center(
+                        child: Text(
+                          '${_markers.length} marked moment${_markers.length == 1 ? '' : 's'}',
+                          style: TextStyle(
+                              color: context.colors.muted, fontSize: 13),
+                        ),
+                      ),
+                    ),
+                ],
                 if (_error != null) ...[
                   const SizedBox(height: 16),
                   Text(_error!, style: TextStyle(color: scheme.error)),
@@ -298,6 +422,34 @@ class _RecordScreenState extends State<RecordScreen> {
       ),
     );
     if (ok == true) await _discard();
+  }
+}
+
+/// Small labelled button for marking a moment while recording.
+class _MarkerButton extends StatelessWidget {
+  final IconData icon;
+  final String label;
+  final VoidCallback onPressed;
+  const _MarkerButton(
+      {required this.icon, required this.label, required this.onPressed});
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        IconButton.outlined(
+          tooltip: label,
+          iconSize: 26,
+          style: IconButton.styleFrom(fixedSize: const Size(56, 56)),
+          onPressed: onPressed,
+          icon: Icon(icon),
+        ),
+        const SizedBox(height: 4),
+        Text(label,
+            style: TextStyle(color: context.colors.muted, fontSize: 12)),
+      ],
+    );
   }
 }
 
