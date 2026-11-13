@@ -20,12 +20,16 @@ class Settings extends ChangeNotifier {
   /// Light, dark or follow the system.
   ThemeMode themeMode;
 
+  /// Show rolling captions while recording (on-device transcription only).
+  bool liveCaptions;
+
   Settings({
     TranscriptionConfig? transcription,
     NoteAiConfig? noteAi,
     SpeakerConfig? speakers,
     this.noteLanguage = 'auto',
     this.themeMode = ThemeMode.system,
+    this.liveCaptions = true,
   })  : transcription = transcription ?? TranscriptionConfig(),
         noteAi = noteAi ?? NoteAiConfig(),
         speakers = speakers ?? SpeakerConfig();
@@ -48,6 +52,7 @@ class Settings extends ChangeNotifier {
             SpeakerConfig.fromJson(Map<String, dynamic>.from(j['speakers']));
       }
       noteLanguage = j['noteLanguage'] ?? 'auto';
+      liveCaptions = j['liveCaptions'] ?? true;
       themeMode = ThemeMode.values.firstWhere(
           (m) => m.name == j['themeMode'],
           orElse: () => ThemeMode.system);
@@ -67,6 +72,7 @@ class Settings extends ChangeNotifier {
         'speakers': speakers.toJson(),
         'noteLanguage': noteLanguage,
         'themeMode': themeMode.name,
+        'liveCaptions': liveCaptions,
       }),
     );
     notifyListeners();

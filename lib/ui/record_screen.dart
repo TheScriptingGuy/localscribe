@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:io';
+import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -11,13 +12,18 @@ import 'package:uuid/uuid.dart';
 
 import '../models/recording.dart';
 import '../services/audio/recording_service.dart';
+import '../services/audio/wav_recorder.dart';
 import '../services/library/recording_store.dart';
+import '../services/models/whisper_models.dart';
+import '../services/transcription/live_captioner.dart';
+import '../settings/settings.dart';
 import 'format.dart';
 import 'recording_detail_screen.dart';
 import 'theme.dart';
 
-/// Phone-mic recorder. Writes 16 kHz mono AAC: small enough for Whisper APIs
-/// (~22 MB/hour, under the common 25 MB upload cap) and enough for speech.
+/// Phone-mic recorder. Writes 16 kHz mono WAV (~115 MB/hour, lossless, which
+  /// whisper.cpp reads directly), with highlights, photos, notes and optional
+  /// live captions while recording.
 class RecordScreen extends StatefulWidget {
   const RecordScreen({super.key});
 
@@ -26,17 +32,13 @@ class RecordScreen extends StatefulWidget {
 }
 
 class _RecordScreenState extends State<RecordScreen> {
-  static const _config = RecordConfig(
-    encoder: AudioEncoder.aacLc,
-    sampleRate: 16000,
-    numChannels: 1,
-    bitRate: 48000,
-  );
-
   final _recorder = AudioRecorder();
+  late final _wav = WavRecorder(_recorder);
   final _elapsed = Stopwatch();
   Timer? _ticker;
-  StreamSubscription<Amplitude>? _ampSub;
+  StreamSubscription<Uint8List>? _pcmSub;
+  LiveCaptioner? _captions;
+  var _captionsOpen = true;
 
   bool _recording = false;
   bool _paused = false;
@@ -60,7 +62,8 @@ class _RecordScreenState extends State<RecordScreen> {
   void dispose() {
     FlutterForegroundTask.removeTaskDataCallback(_onNotificationAction);
     _ticker?.cancel();
-    _ampSub?.cancel();
+    _pcmSub?.cancel();
+    _captions?.dispose();
     _recorder.dispose();
     RecordingService.stop();
     super.dispose();
@@ -79,12 +82,12 @@ class _RecordScreenState extends State<RecordScreen> {
   }
 
   Future<void> _start() async {
-    if (!await _recorder.hasPermission()) {
+    if (!await _wav.hasPermission()) {
       setState(() => _error = 'Microphone permission was denied.');
       return;
     }
     final store = context.read<RecordingStore>();
-    final path = await store.newTempAudioPath('m4a');
+    final path = await store.newTempAudioPath('wav');
     // Start the foreground service first so the mic stays live with the
     // screen off. If it fails, record anyway — just foreground-only.
     String? serviceWarning;
@@ -94,7 +97,7 @@ class _RecordScreenState extends State<RecordScreen> {
       serviceWarning = 'Background recording unavailable ($e); keep the app open.';
     }
     try {
-      await _recorder.start(_config, path: path);
+      await _wav.start(path);
     } catch (e) {
       await RecordingService.stop();
       setState(() => _error = 'Could not start recording: $e');
@@ -106,11 +109,17 @@ class _RecordScreenState extends State<RecordScreen> {
       ..start();
     _ticker = Timer.periodic(
         const Duration(milliseconds: 250), (_) => setState(() {}));
-    _ampSub = _recorder
-        .onAmplitudeChanged(const Duration(milliseconds: 120))
-        .listen((a) {
-      // dBFS (-60..0) -> 0..1 for the level meter.
-      final level = ((a.current + 60) / 60).clamp(0.0, 1.0);
+    final settings = context.read<Settings>();
+    final models = context.read<WhisperModelManager>();
+    final captions = LiveCaptioner.tryCreate(settings, models);
+    captions?.addListener(() {
+      if (mounted) setState(() {});
+    });
+    _captions = captions;
+    _pcmSub = _wav.pcm.listen((chunk) {
+      captions?.feed(chunk);
+      final level = WavRecorder.level(chunk);
+      if (!mounted) return;
       setState(() {
         _levels.add(_paused ? 0 : level);
         if (_levels.length > _maxLevels) _levels.removeAt(0);
@@ -125,7 +134,7 @@ class _RecordScreenState extends State<RecordScreen> {
   RecordingMarker _newMarker(MarkerType type, {String? text}) =>
       RecordingMarker(
         id: const Uuid().v4(),
-        atMs: _elapsed.elapsedMilliseconds,
+        atMs: _wav.durationMs,
         type: type,
         text: text,
       );
@@ -202,10 +211,10 @@ class _RecordScreenState extends State<RecordScreen> {
 
   Future<void> _togglePause() async {
     if (_paused) {
-      await _recorder.resume();
+      await _wav.resume();
       _elapsed.start();
     } else {
-      await _recorder.pause();
+      await _wav.pause();
       _elapsed.stop();
     }
     setState(() => _paused = !_paused);
@@ -217,22 +226,26 @@ class _RecordScreenState extends State<RecordScreen> {
     final navigator = Navigator.of(context);
     _elapsed.stop();
     _ticker?.cancel();
-    await _ampSub?.cancel();
-    final path = await _recorder.stop();
-    await RecordingService.stop();
-    if (path == null) {
+    _captions?.stop();
+    await _pcmSub?.cancel();
+    final String path;
+    try {
+      path = await _wav.stop();
+    } catch (e) {
+      await RecordingService.stop();
       setState(() {
         _recording = false;
-        _error = 'Recording produced no file.';
+        _error = 'Recording produced no file: $e';
       });
       return;
     }
+    await RecordingService.stop();
     final now = DateTime.now();
     final rec = await store.add(
       File(path),
       title: 'Recording ${formatDate(now)}',
       source: RecordingSource.mic,
-      durationMs: _elapsed.elapsedMilliseconds,
+      durationMs: _wav.durationMs,
       move: true,
       markers: List.of(_markers)..sort((a, b) => a.atMs.compareTo(b.atMs)),
       photos: Map.of(_photos),
@@ -243,8 +256,9 @@ class _RecordScreenState extends State<RecordScreen> {
 
   Future<void> _discard() async {
     _ticker?.cancel();
-    await _ampSub?.cancel();
-    await _recorder.cancel(); // stops and deletes the temp file
+    _captions?.stop();
+    await _pcmSub?.cancel();
+    await _wav.cancel(); // stops and deletes the temp file
     for (final f in _photos.values) {
       try {
         await f.delete();
@@ -321,6 +335,16 @@ class _RecordScreenState extends State<RecordScreen> {
                     ),
                   ),
                 ),
+                if (_recording && _captions != null) ...[
+                  const SizedBox(height: 16),
+                  _CaptionsPanel(
+                    lines: _captions!.recentLines(),
+                    open: _captionsOpen,
+                    error: _captions!.error,
+                    onToggle: () =>
+                        setState(() => _captionsOpen = !_captionsOpen),
+                  ),
+                ],
                 if (_recording) ...[
                   const SizedBox(height: 24),
                   Row(
@@ -422,6 +446,70 @@ class _RecordScreenState extends State<RecordScreen> {
       ),
     );
     if (ok == true) await _discard();
+  }
+}
+
+/// Rolling live captions, collapsible.
+class _CaptionsPanel extends StatelessWidget {
+  final List<String> lines;
+  final bool open;
+  final String? error;
+  final VoidCallback onToggle;
+  const _CaptionsPanel(
+      {required this.lines,
+      required this.open,
+      required this.error,
+      required this.onToggle});
+
+  @override
+  Widget build(BuildContext context) {
+    final c = context.colors;
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.fromLTRB(16, 8, 8, 12),
+      decoration: BoxDecoration(
+        color: c.fill,
+        borderRadius: BorderRadius.circular(14),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(Icons.closed_caption_outlined, size: 18, color: c.muted),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text('Live captions',
+                    style: TextStyle(color: c.muted, fontSize: 13)),
+              ),
+              IconButton(
+                visualDensity: VisualDensity.compact,
+                tooltip: open ? 'Hide captions' : 'Show captions',
+                onPressed: onToggle,
+                icon: Icon(open ? Icons.expand_less : Icons.expand_more),
+              ),
+            ],
+          ),
+          if (open)
+            Padding(
+              padding: const EdgeInsets.only(right: 8),
+              child: Text(
+                error != null
+                    ? 'Captions paused: $error'
+                    : lines.isEmpty
+                        ? 'Listening…'
+                        : lines.join(' '),
+                maxLines: 5,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                    fontSize: 16,
+                    height: 1.4,
+                    color: error != null ? c.danger : c.text),
+              ),
+            ),
+        ],
+      ),
+    );
   }
 }
 

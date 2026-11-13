@@ -87,6 +87,20 @@ class _OptionsScreenState extends State<OptionsScreen> {
             ),
           ),
           const SizedBox(height: 28),
+          _sectionTitle(context, 'Recording'),
+          SwitchListTile(
+            contentPadding: EdgeInsets.zero,
+            title: const Text('Live captions'),
+            subtitle: Text(settings.transcription.onDevice
+                ? 'Show captions while recording. Uses extra battery; a smaller model keeps up best.'
+                : 'Needs on-device transcription (turn it on below).'),
+            value: settings.liveCaptions,
+            onChanged: (v) {
+              settings.liveCaptions = v;
+              settings.save();
+            },
+          ),
+          const SizedBox(height: 20),
           _sectionTitle(context, 'Transcription AI'),
           _modeToggle(
             onDevice: t.onDevice,

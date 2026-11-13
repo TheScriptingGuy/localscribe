@@ -521,14 +521,27 @@ LS_API char *ls_transcribe(const char *model_path, const char *audio_path, const
     Job *job = job_ptr ? (Job *)job_ptr : &local;
     std::string err;
 
-    const int64_t total = decode_to_pcm(audio_path, pcm_path, job, err);
-    if (total < 0) {
-        unlink(pcm_path);
-        return json_error(err);
+    // Live captions pass an empty `audio_path`: `pcm_path` then already holds
+    // 16 kHz mono 16-bit PCM, is not decoded, and is left for the caller.
+    const bool raw = !audio_path || !*audio_path;
+    auto cleanup = [&] {
+        if (!raw) unlink(pcm_path);
+    };
+    int64_t total = 0;
+    if (raw) {
+        struct stat st;
+        if (stat(pcm_path, &st) != 0) return json_error("Audio chunk is missing.");
+        total = (int64_t)st.st_size / 2;
+    } else {
+        total = decode_to_pcm(audio_path, pcm_path, job, err);
+        if (total < 0) {
+            cleanup();
+            return json_error(err);
+        }
     }
     const bool pieces = ranges && n_ranges > 0;
     if (!pieces && total < kRate / 2) {
-        unlink(pcm_path);
+        cleanup();
         return strdup("{\"language\":null,\"segments\":[]}");
     }
     LOGI("decoded %.1f s of audio", (double)total / kRate);
@@ -537,7 +550,7 @@ LS_API char *ls_transcribe(const char *model_path, const char *audio_path, const
     cparams.use_gpu = false;
     whisper_context *ctx = whisper_init_from_file_with_params(model_path, cparams);
     if (!ctx) {
-        unlink(pcm_path);
+        cleanup();
         return json_error("Could not load the whisper model. Try downloading it again.");
     }
 
@@ -586,7 +599,7 @@ LS_API char *ls_transcribe(const char *model_path, const char *audio_path, const
     }
 
     if (f) fclose(f);
-    unlink(pcm_path);
+    cleanup();
     whisper_free(ctx);
 
     if (!ok) return json_error(job->cancel.load() ? "cancelled" : "Transcription failed.");
