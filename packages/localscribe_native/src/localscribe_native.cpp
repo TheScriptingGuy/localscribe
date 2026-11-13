@@ -109,6 +109,8 @@ public:
 
     int64_t written() const { return written_; }
     int channels() const { return channels_; }
+    double rms() const { return written_ ? std::sqrt(sumSq_ / (double)written_) : 0.0; }
+    int16_t peak() const { return peak_; }
 
 private:
     void resample(const float *x, size_t n) {
@@ -128,7 +130,11 @@ private:
 
     void emit(float v) {
         v = std::max(-1.0f, std::min(1.0f, v));
-        buf_.push_back((int16_t)std::lrint(v * 32767.0f));
+        const int16_t s = (int16_t)std::lrint(v * 32767.0f);
+        buf_.push_back(s);
+        sumSq_ += (double)s * (double)s;
+        const int16_t a = (int16_t)std::abs((int)s);
+        if (a > peak_) peak_ = a;
         if (buf_.size() >= 16384) flush();
     }
 
@@ -147,6 +153,8 @@ private:
     std::vector<float> mono_;
     std::vector<int16_t> buf_;
     int64_t written_ = 0;
+    double sumSq_ = 0;
+    int16_t peak_ = 0;
 };
 
 constexpr int32_t kPcm16 = 2;   // AudioFormat.ENCODING_PCM_16BIT
@@ -289,7 +297,11 @@ int64_t decode_to_pcm(const char *path, const char *pcm_path, Job *job, std::str
             err = "Cannot write the temporary audio file (storage full?).";
             failed = true;
         }
-        if (!failed) result = writer.written();
+        if (!failed) {
+            result = writer.written();
+            LOGI("decoded pcm: %lld samples (%.2fs @16kHz), rms=%.1f peak=%d",
+                 (long long)result, result / 16000.0, writer.rms(), writer.peak());
+        }
     } while (false);
 
     if (out) fclose(out);
