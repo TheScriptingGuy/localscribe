@@ -169,12 +169,14 @@ class _RootShellState extends State<RootShell> {
                 subtitle: 'Capture with the phone microphone',
                 onTap: () => Navigator.pop(ctx, 'record'),
               ),
-              for (final d in recorders)
+              if (recorders.isNotEmpty)
                 _SheetAction(
                   icon: Icons.settings_remote_outlined,
-                  title: 'Record on ${d.name}',
+                  title: recorders.length == 1
+                      ? 'Record on ${recorders.first.name}'
+                      : 'Record on Plaud',
                   subtitle: 'Start your Plaud recorder from here, with highlights',
-                  onTap: () => Navigator.pop(ctx, 'device:${d.serial}'),
+                  onTap: () => Navigator.pop(ctx, 'device'),
                 ),
               _SheetAction(
                 icon: Icons.upload_file_outlined,
@@ -194,9 +196,11 @@ class _RootShellState extends State<RootShell> {
       ),
     );
     if (!mounted) return;
-    if (choice != null && choice.startsWith('device:')) {
-      final dev = cred.deviceBySerial(choice.substring('device:'.length));
-      if (dev != null) {
+    if (choice == 'device') {
+      final dev = recorders.length == 1
+          ? recorders.first
+          : await _pickRecorder(recorders);
+      if (dev != null && mounted) {
         Navigator.of(context).push(MaterialPageRoute(
             builder: (_) => DeviceRecordScreen(device: dev)));
       }
@@ -213,6 +217,36 @@ class _RootShellState extends State<RootShell> {
             .push(MaterialPageRoute(builder: (_) => const PlaudDevicesScreen()));
     }
   }
+
+  /// Which recorder to record on, when more than one is paired.
+  Future<PlaudDeviceCred?> _pickRecorder(List<PlaudDeviceCred> recorders) =>
+      showModalBottomSheet<PlaudDeviceCred>(
+        context: context,
+        showDragHandle: true,
+        builder: (ctx) => SafeArea(
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(8, 0, 8, 16),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+                  child: Text('Which recorder?',
+                      style: Theme.of(ctx).textTheme.titleLarge),
+                ),
+                for (final d in recorders)
+                  _SheetAction(
+                    icon: Icons.settings_remote_outlined,
+                    title: d.name,
+                    subtitle: 'Serial ${d.serial}',
+                    onTap: () => Navigator.pop(ctx, d),
+                  ),
+              ],
+            ),
+          ),
+        ),
+      );
 
   @override
   Widget build(BuildContext context) {
