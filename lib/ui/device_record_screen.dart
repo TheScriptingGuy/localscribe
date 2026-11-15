@@ -17,19 +17,25 @@ import '../services/ble/plaud_import.dart';
 import '../services/library/recording_store.dart';
 import 'format.dart';
 import 'record_widgets.dart';
-import 'recording_detail_screen.dart';
 import 'theme.dart';
 
-/// Records on the Plaud recorder, started and stopped from the phone like the
-/// Plaud app does. The audio streams in over Bluetooth while it records;
-/// highlights come from the Highlight button here or a short press of the
-/// recorder's own button, and photos and notes can be added along the way.
+/// Records on the Plaud recorder, started and stopped from the phone, laid
+/// out like the Plaud app's recording sheet: Pause | hh:mm:ss | Stop on top,
+/// a live "Recording highlights" timeline, and Type / Photo / Highlight
+/// below. A short press of the recorder's own button adds a highlight too.
 class DeviceRecordScreen extends StatefulWidget {
   final PlaudDeviceCred device;
   const DeviceRecordScreen({super.key, required this.device});
 
   @override
   State<DeviceRecordScreen> createState() => _DeviceRecordScreenState();
+}
+
+/// One line in the timeline: a marker made here, or a recorder-button mark.
+class _Entry {
+  final RecordingMarker marker;
+  final bool fromRecorder;
+  _Entry(this.marker, {this.fromRecorder = false});
 }
 
 class _DeviceRecordScreenState extends State<DeviceRecordScreen> {
@@ -42,18 +48,25 @@ class _DeviceRecordScreenState extends State<DeviceRecordScreen> {
   bool _starting = false;
   bool _recording = false;
   bool _stopping = false;
+  bool _pausing = false;
   String? _error;
 
-  /// Moments marked in this app; the recorder's own marks are read from the
-  /// audio when the recording is saved.
-  final _markers = <RecordingMarker>[];
+  final _entries = <_Entry>[];
   final _photos = <String, File>{};
-  int _recorderMarks = 0;
+
+  /// The note being typed inline, if any.
+  String? _editingId;
+  final _noteCtrl = TextEditingController();
+  final _noteFocus = FocusNode();
+  final _scroll = ScrollController();
 
   @override
   void initState() {
     super.initState();
     _session.addListener(_onSession);
+    _noteFocus.addListener(() {
+      if (!_noteFocus.hasFocus) _commitNote();
+    });
   }
 
   void _onSession() {
@@ -66,6 +79,9 @@ class _DeviceRecordScreenState extends State<DeviceRecordScreen> {
     _ticker?.cancel();
     _markSub?.cancel();
     _session.dispose();
+    _noteCtrl.dispose();
+    _noteFocus.dispose();
+    _scroll.dispose();
     RecordingService.stopWork(_workOwner).catchError((_) {});
     super.dispose();
   }
@@ -116,35 +132,37 @@ class _DeviceRecordScreenState extends State<DeviceRecordScreen> {
     });
   }
 
+  void _add(_Entry e) {
+    setState(() => _entries.add(e));
+    // Keep the newest entry in view.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (_scroll.hasClients) {
+        _scroll.animateTo(_scroll.position.maxScrollExtent,
+            duration: const Duration(milliseconds: 250), curve: Curves.easeOut);
+      }
+    });
+  }
+
   void _onRecorderMark(int atMs) {
     if (!mounted) return;
     HapticFeedback.mediumImpact();
-    setState(() => _recorderMarks++);
-    ScaffoldMessenger.of(context)
-      ..hideCurrentSnackBar()
-      ..showSnackBar(SnackBar(
-          duration: const Duration(seconds: 2),
-          content: Text('Highlight from the recorder at '
-              '${formatDuration(Duration(milliseconds: atMs))}')));
+    _add(_Entry(
+        RecordingMarker(
+            id: const Uuid().v4(), atMs: atMs, type: MarkerType.flag),
+        fromRecorder: true));
   }
 
   RecordingMarker _newMarker(MarkerType type, {String? text}) =>
       RecordingMarker(
         id: const Uuid().v4(),
-        atMs: _session.liveElapsed.inMilliseconds,
+        atMs: _session.liveMarkMs,
         type: type,
         text: text,
       );
 
   void _flag() {
     HapticFeedback.mediumImpact();
-    setState(() => _markers.add(_newMarker(MarkerType.flag)));
-    ScaffoldMessenger.of(context)
-      ..hideCurrentSnackBar()
-      ..showSnackBar(SnackBar(
-          duration: const Duration(seconds: 2),
-          content: Text(
-              'Highlight marked at ${formatDuration(_session.liveElapsed)}')));
+    _add(_Entry(_newMarker(MarkerType.flag)));
   }
 
   Future<void> _photo() async {
@@ -153,65 +171,62 @@ class _DeviceRecordScreenState extends State<DeviceRecordScreen> {
       final shot = await ImagePicker().pickImage(
           source: ImageSource.camera, imageQuality: 85, maxWidth: 1920);
       if (shot == null || !mounted) return;
-      setState(() {
-        _markers.add(marker);
-        _photos[marker.id] = File(shot.path);
-      });
+      _photos[marker.id] = File(shot.path);
+      _add(_Entry(marker));
     } catch (e) {
       if (mounted) setState(() => _error = 'Could not take a photo: $e');
     }
   }
 
-  Future<void> _note() async {
-    final marker = _newMarker(MarkerType.note);
-    final ctrl = TextEditingController();
-    final text = await showModalBottomSheet<String>(
-      context: context,
-      isScrollControlled: true,
-      showDragHandle: true,
-      builder: (ctx) => Padding(
-        padding: EdgeInsets.fromLTRB(
-            24, 0, 24, 24 + MediaQuery.viewInsetsOf(ctx).bottom),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-                'Add a note at ${formatDuration(Duration(milliseconds: marker.atMs))}',
-                style: Theme.of(ctx).textTheme.titleLarge),
-            const SizedBox(height: 12),
-            TextField(
-              controller: ctrl,
-              autofocus: true,
-              minLines: 2,
-              maxLines: 5,
-              textCapitalization: TextCapitalization.sentences,
-              decoration:
-                  const InputDecoration(hintText: 'Key point, idea or reminder'),
-            ),
-            const SizedBox(height: 16),
-            Align(
-              alignment: Alignment.centerRight,
-              child: FilledButton(
-                onPressed: () => Navigator.pop(ctx, ctrl.text.trim()),
-                child: const Text('Add note'),
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-    ctrl.dispose();
-    if (text == null || text.isEmpty || !mounted) return;
-    setState(() => _markers.add(RecordingMarker(
-        id: marker.id, atMs: marker.atMs, type: MarkerType.note, text: text)));
+  /// Type: a note line appears in the timeline with the cursor in it, like
+  /// the Plaud app; it is kept when typing ends, dropped if left empty.
+  void _type() {
+    _commitNote();
+    final m = _newMarker(MarkerType.note);
+    _noteCtrl.clear();
+    _editingId = m.id;
+    _add(_Entry(m));
+    WidgetsBinding.instance
+        .addPostFrameCallback((_) => _noteFocus.requestFocus());
+  }
+
+  void _commitNote() {
+    final id = _editingId;
+    if (id == null) return;
+    _editingId = null;
+    final text = _noteCtrl.text.trim();
+    final i = _entries.indexWhere((e) => e.marker.id == id);
+    if (i < 0) return;
+    setState(() {
+      if (text.isEmpty) {
+        _entries.removeAt(i);
+      } else {
+        final m = _entries[i].marker;
+        _entries[i] = _Entry(RecordingMarker(
+            id: m.id, atMs: m.atMs, type: MarkerType.note, text: text));
+      }
+    });
+  }
+
+  Future<void> _togglePause() async {
+    if (_pausing) return;
+    _commitNote();
+    setState(() => _pausing = true);
+    if (_session.livePaused) {
+      await _session.resumeRecording();
+    } else {
+      await _session.pauseRecording();
+    }
+    if (mounted) setState(() => _pausing = false);
   }
 
   Future<void> _stop() async {
     if (_stopping) return;
+    _commitNote();
     final store = context.read<RecordingStore>();
     final pem = context.read<PlaudCredentials>().rsaPrivateKeyPem;
     final navigator = Navigator.of(context);
+    final messenger = ScaffoldMessenger.of(context);
     setState(() => _stopping = true);
     _ticker?.cancel();
     final result = await _session.stopRecording();
@@ -229,27 +244,60 @@ class _DeviceRecordScreenState extends State<DeviceRecordScreen> {
     final priv = (pem == null || pem.isEmpty)
         ? null
         : PlaudCrypto.privateKeyFromPem(pem);
+    // Recorder-button marks are read back from the audio itself, so only the
+    // ones made in this app are passed along.
+    final mine = [
+      for (final e in _entries)
+        if (!e.fromRecorder) e.marker,
+    ];
     final rec = await addPlaudRecording(store, priv, result,
-        markers: _markers, photos: Map.of(_photos));
-    navigator.pushReplacement(MaterialPageRoute(
-        builder: (_) => RecordingDetailScreen(recordingId: rec.id)));
+        markers: mine, photos: Map.of(_photos));
+    // Like the Plaud app: back to the files list, where it shows up on top.
+    navigator.pop();
+    messenger.showSnackBar(SnackBar(content: Text('Saved "${rec.title}"')));
   }
 
-  Future<void> _confirmLeave() async {
-    final stop = await showDialog<bool>(
+  /// The Plaud app's stop sheet.
+  Future<void> _confirmStop() async {
+    final stop = await showModalBottomSheet<bool>(
       context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('Stop recording?'),
-        content: const Text(
-            'The recorder is still recording. Stop it and save the recording here?'),
-        actions: [
-          TextButton(
-              onPressed: () => Navigator.pop(ctx, false),
-              child: const Text('Keep recording')),
-          TextButton(
-              onPressed: () => Navigator.pop(ctx, true),
-              child: const Text('Stop and save')),
-        ],
+      builder: (ctx) => SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(24, 16, 24, 24),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Row(children: [
+                Expanded(
+                  child: Text('Stop recording?',
+                      style: Theme.of(ctx).textTheme.headlineMedium),
+                ),
+                IconButton(
+                  icon: const Icon(Icons.close),
+                  onPressed: () => Navigator.pop(ctx, false),
+                ),
+              ]),
+              const Divider(height: 24),
+              const Text('Your recording will be saved automatically.',
+                  style: TextStyle(fontSize: 16)),
+              const SizedBox(height: 24),
+              FilledButton(
+                style: FilledButton.styleFrom(
+                    minimumSize: const Size.fromHeight(52)),
+                onPressed: () => Navigator.pop(ctx, true),
+                child: const Text('Stop and save'),
+              ),
+              const SizedBox(height: 12),
+              OutlinedButton(
+                style: OutlinedButton.styleFrom(
+                    minimumSize: const Size.fromHeight(52)),
+                onPressed: () => Navigator.pop(ctx, false),
+                child: const Text('Continue recording'),
+              ),
+            ],
+          ),
+        ),
       ),
     );
     if (stop == true) await _stop();
@@ -257,135 +305,329 @@ class _DeviceRecordScreenState extends State<DeviceRecordScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final c = context.colors;
-    final elapsed = _recording ? _session.liveElapsed : Duration.zero;
-    final received = Duration(milliseconds: _session.liveReceivedMs);
-    final marks = _markers.length + _recorderMarks;
     final busy = _starting || _stopping;
-
     return PopScope(
       canPop: !_recording && !busy,
       onPopInvokedWithResult: (didPop, _) {
-        if (!didPop && _recording && !_stopping) _confirmLeave();
+        if (!didPop && _recording && !_stopping) _confirmStop();
       },
       child: Scaffold(
-        appBar: AppBar(),
+        appBar: _recording ? null : AppBar(),
         body: SafeArea(
-          child: Padding(
-            padding: const EdgeInsets.fromLTRB(24, 0, 24, 24),
-            child: Column(
+          child: _recording || _stopping ? _live(context) : _idle(context),
+        ),
+      ),
+    );
+  }
+
+  /// Before starting (or after a failure).
+  Widget _idle(BuildContext context) {
+    final c = context.colors;
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(24, 0, 24, 24),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text('Record on ${widget.device.name}',
+              style: Theme.of(context).textTheme.displaySmall),
+          const SizedBox(height: 8),
+          Text(
+            _starting
+                ? _session.message
+                : 'Starts the recorder over Bluetooth. A short press of its '
+                    'button adds a highlight.',
+            style: TextStyle(color: c.muted, fontSize: 15),
+          ),
+          if (_error != null) ...[
+            const SizedBox(height: 16),
+            Text(_error!, style: TextStyle(color: c.danger)),
+          ],
+          const Spacer(),
+          Center(
+            child: _starting
+                ? const SizedBox(
+                    width: 88,
+                    height: 88,
+                    child: Padding(
+                      padding: EdgeInsets.all(24),
+                      child: CircularProgressIndicator(),
+                    ),
+                  )
+                : RoundButton(
+                    tooltip: 'Start recording',
+                    icon: Icons.fiber_manual_record,
+                    onPressed: _start),
+          ),
+          const SizedBox(height: 24),
+        ],
+      ),
+    );
+  }
+
+  /// While recording: the Plaud recording sheet.
+  Widget _live(BuildContext context) {
+    final c = context.colors;
+    final paused = _session.livePaused;
+    final canMark = !paused && !_stopping;
+    return Column(
+      children: [
+        // Pause | ·ılı 00:00:31 | Stop
+        Padding(
+          padding: const EdgeInsets.fromLTRB(12, 12, 12, 8),
+          child: Row(
+            children: [
+              SizedBox(
+                width: 110,
+                child: Align(
+                  alignment: Alignment.centerLeft,
+                  child: TextButton(
+                    onPressed: _stopping || _pausing ? null : _togglePause,
+                    child: Text(paused ? 'Resume' : 'Pause',
+                        style: const TextStyle(fontSize: 20)),
+                  ),
+                ),
+              ),
+              Expanded(
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Icon(Icons.graphic_eq,
+                        size: 22, color: paused ? c.faint : c.text),
+                    const SizedBox(width: 6),
+                    Text(
+                      formatClock(_session.liveElapsed),
+                      style: const TextStyle(
+                        fontSize: 20,
+                        fontWeight: FontWeight.w700,
+                        fontFeatures: [FontFeature.tabularFigures()],
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              SizedBox(
+                width: 110,
+                child: Align(
+                  alignment: Alignment.centerRight,
+                  child: _stopping
+                      ? const Padding(
+                          padding: EdgeInsets.all(12),
+                          child: SizedBox(
+                              width: 22,
+                              height: 22,
+                              child: CircularProgressIndicator(strokeWidth: 2)),
+                        )
+                      : TextButton(
+                          onPressed: _confirmStop,
+                          child: const Text('Stop',
+                              style: TextStyle(
+                                  fontSize: 20, fontWeight: FontWeight.w700)),
+                        ),
+                ),
+              ),
+            ],
+          ),
+        ),
+        if (_session.message.startsWith('Connection lost') || _error != null)
+          Padding(
+            padding: const EdgeInsets.fromLTRB(24, 0, 24, 8),
+            child: Text(_error ?? _session.message,
+                style: TextStyle(color: c.danger)),
+          ),
+        Expanded(
+          child: _entries.isEmpty ? _hints(context) : _timeline(context),
+        ),
+        Padding(
+          padding: const EdgeInsets.fromLTRB(24, 8, 24, 24),
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+            children: [
+              _CircleAction(
+                  icon: Icons.edit_outlined,
+                  label: 'Type',
+                  onPressed: canMark ? _type : null),
+              _CircleAction(
+                  icon: Icons.photo_camera_outlined,
+                  label: 'Photo',
+                  onPressed: canMark ? _photo : null),
+              _CircleAction(
+                  icon: Icons.flag_outlined,
+                  label: 'Highlight',
+                  onPressed: canMark ? _flag : null),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+
+  /// Empty timeline: what each button does.
+  Widget _hints(BuildContext context) {
+    final c = context.colors;
+    Widget hint(IconData icon, String title, String body) => Padding(
+          padding: const EdgeInsets.only(bottom: 28),
+          child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Container(
+              width: 64,
+              height: 64,
+              decoration: BoxDecoration(
+                  shape: BoxShape.circle, border: Border.all(color: c.line)),
+              child: Icon(icon, color: c.muted),
+            ),
+            const SizedBox(width: 20),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(title, style: TextStyle(fontSize: 22, color: c.muted)),
+                  const SizedBox(height: 4),
+                  Text(body, style: TextStyle(fontSize: 16, color: c.faint)),
+                ],
+              ),
+            ),
+          ]),
+        );
+    return ListView(
+      padding: const EdgeInsets.fromLTRB(24, 24, 24, 0),
+      children: [
+        hint(Icons.flag_outlined, 'Add a highlight',
+            'Mark a key moment, or press the recorder\'s button briefly.'),
+        hint(Icons.photo_camera_outlined, 'Add a photo',
+            'Capture visual details you want to remember.'),
+        hint(Icons.edit_outlined, 'Add a note',
+            'Jot down key points or ideas instantly.'),
+      ],
+    );
+  }
+
+  Widget _timeline(BuildContext context) {
+    final c = context.colors;
+    final store = context.read<RecordingStore>();
+    return ListView(
+      controller: _scroll,
+      padding: const EdgeInsets.fromLTRB(24, 16, 24, 16),
+      children: [
+        Text('Recording highlights',
+            style: Theme.of(context)
+                .textTheme
+                .displaySmall
+                ?.copyWith(color: c.muted)),
+        const SizedBox(height: 24),
+        for (final e in _entries)
+          Padding(
+            padding: const EdgeInsets.only(bottom: 28),
+            child: Row(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(
-                  _stopping
-                      ? 'Saving…'
-                      : _recording
-                          ? 'Recording'
-                          : 'Record on ${widget.device.name}',
-                  style: Theme.of(context).textTheme.displaySmall,
-                ),
-                const SizedBox(height: 8),
-                Row(children: [
-                  if (_recording && !_stopping) ...[
-                    Container(
-                      width: 8,
-                      height: 8,
-                      decoration: BoxDecoration(
-                          color: c.danger, shape: BoxShape.circle),
-                    ),
-                    const SizedBox(width: 8),
-                  ],
-                  Expanded(
-                    child: Text(
-                      busy || _recording
-                          ? _session.message
-                          : 'Starts the recorder over Bluetooth. A short press '
-                              'of its button adds a highlight.',
-                      style: TextStyle(color: c.muted, fontSize: 15),
-                    ),
-                  ),
-                ]),
-                const Spacer(),
-                Center(
-                  child: Text(
-                    formatDuration(elapsed),
-                    style: Theme.of(context).textTheme.displayLarge?.copyWith(
-                      fontWeight: FontWeight.w200,
-                      fontFeatures: const [FontFeature.tabularFigures()],
-                    ),
-                  ),
-                ),
-                if (_recording)
-                  Center(
-                    child: Padding(
-                      padding: const EdgeInsets.only(top: 8),
-                      child: Text(
-                        'Received ${formatDuration(received)} over Bluetooth',
-                        style: TextStyle(color: c.muted, fontSize: 13),
-                      ),
-                    ),
-                  ),
-                if (_recording && !_stopping) ...[
-                  const SizedBox(height: 32),
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                Icon(
+                    switch (e.marker.type) {
+                      MarkerType.flag => Icons.flag_outlined,
+                      MarkerType.photo => Icons.photo_camera_outlined,
+                      MarkerType.note => Icons.edit_outlined,
+                    },
+                    color: c.text),
+                const SizedBox(width: 16),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      MarkerButton(
-                          icon: Icons.flag_outlined,
-                          label: 'Highlight',
-                          onPressed: _flag),
-                      MarkerButton(
-                          icon: Icons.photo_camera_outlined,
-                          label: 'Photo',
-                          onPressed: _photo),
-                      MarkerButton(
-                          icon: Icons.edit_note,
-                          label: 'Note',
-                          onPressed: _note),
+                      Text(
+                          // Rounded, like the Plaud app (29.7 s -> 00:00:30).
+                          formatClock(Duration(
+                              seconds: (e.marker.atMs / 1000).round())),
+                          style: TextStyle(
+                              color: c.muted,
+                              fontSize: 16,
+                              fontFeatures: const [
+                                FontFeature.tabularFigures()
+                              ])),
+                      const SizedBox(height: 6),
+                      _entryBody(context, e, store),
                     ],
                   ),
-                  if (marks > 0)
-                    Padding(
-                      padding: const EdgeInsets.only(top: 12),
-                      child: Center(
-                        child: Text(
-                          '$marks marked moment${marks == 1 ? '' : 's'}',
-                          style: TextStyle(color: c.muted, fontSize: 13),
-                        ),
-                      ),
-                    ),
-                ],
-                if (_error != null) ...[
-                  const SizedBox(height: 16),
-                  Text(_error!, style: TextStyle(color: c.danger)),
-                ],
-                const Spacer(),
-                Center(
-                  child: busy
-                      ? const SizedBox(
-                          width: 88,
-                          height: 88,
-                          child: Padding(
-                            padding: EdgeInsets.all(24),
-                            child: CircularProgressIndicator(),
-                          ),
-                        )
-                      : _recording
-                          ? RoundButton(
-                              tooltip: 'Stop and save',
-                              icon: Icons.stop_rounded,
-                              onPressed: _stop)
-                          : RoundButton(
-                              tooltip: 'Start recording',
-                              icon: Icons.fiber_manual_record,
-                              onPressed: _start),
                 ),
-                const SizedBox(height: 24),
               ],
             ),
           ),
+      ],
+    );
+  }
+
+  Widget _entryBody(BuildContext context, _Entry e, RecordingStore store) {
+    const style = TextStyle(fontSize: 20, height: 1.35);
+    final m = e.marker;
+    switch (m.type) {
+      case MarkerType.flag:
+        return Text(
+            e.fromRecorder ? 'Highlighted on the recorder' : 'Highlighted',
+            style: style);
+      case MarkerType.note:
+        if (_editingId == m.id) {
+          return TextField(
+            controller: _noteCtrl,
+            focusNode: _noteFocus,
+            style: style,
+            maxLines: null,
+            textCapitalization: TextCapitalization.sentences,
+            textInputAction: TextInputAction.done,
+            onSubmitted: (_) => _noteFocus.unfocus(),
+            decoration: const InputDecoration(
+              hintText: 'Type a note',
+              border: InputBorder.none,
+              enabledBorder: InputBorder.none,
+              focusedBorder: InputBorder.none,
+              filled: false,
+              isDense: true,
+              contentPadding: EdgeInsets.zero,
+            ),
+          );
+        }
+        return Text(m.text ?? '', style: style);
+      case MarkerType.photo:
+        final f = _photos[m.id];
+        if (f == null) return const Text('Photo', style: style);
+        return ClipRRect(
+          borderRadius: BorderRadius.circular(10),
+          child: Image.file(f,
+              height: 160, fit: BoxFit.cover, cacheHeight: 480),
+        );
+    }
+  }
+}
+
+/// Plaud's round outlined action with a label under it.
+class _CircleAction extends StatelessWidget {
+  final IconData icon;
+  final String label;
+  final VoidCallback? onPressed;
+  const _CircleAction(
+      {required this.icon, required this.label, required this.onPressed});
+
+  @override
+  Widget build(BuildContext context) {
+    final c = context.colors;
+    final enabled = onPressed != null;
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Material(
+          color: c.surface,
+          shape: CircleBorder(side: BorderSide(color: c.line)),
+          clipBehavior: Clip.antiAlias,
+          child: InkWell(
+            onTap: onPressed,
+            child: SizedBox(
+              width: 80,
+              height: 80,
+              child: Icon(icon, size: 30, color: enabled ? c.text : c.faint),
+            ),
+          ),
         ),
-      ),
+        const SizedBox(height: 8),
+        Text(label,
+            style: TextStyle(
+                color: enabled ? c.muted : c.faint, fontSize: 15)),
+      ],
     );
   }
 }

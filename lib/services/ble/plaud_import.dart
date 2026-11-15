@@ -1,6 +1,7 @@
 import 'dart:io';
 
 import 'package:flutter/foundation.dart';
+import 'package:intl/intl.dart';
 import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
 import 'package:pointycastle/export.dart';
@@ -46,7 +47,7 @@ Future<Recording> addPlaudRecording(
   all.sort((a, b) => a.atMs.compareTo(b.atMs));
   return store.add(
     f,
-    title: title ?? 'Plaud Note ${d.fileId.toRadixString(16)}',
+    title: title ?? plaudTitle(d.fileId),
     source: RecordingSource.plaud,
     durationMs: durationMs,
     move: true,
@@ -55,6 +56,14 @@ Future<Recording> addPlaudRecording(
     createdAt: fileIdTime(d.fileId),
     deviceFileId: d.fileId,
   );
+}
+
+/// The Plaud app names recordings by their start time, "2026-11-15 21:12:06".
+String plaudTitle(int fileId) {
+  final t = fileIdTime(fileId);
+  return t == null
+      ? 'Plaud Note ${fileId.toRadixString(16)}'
+      : DateFormat('yyyy-MM-dd HH:mm:ss').format(t);
 }
 
 /// The recorder's file id is the unix time (seconds) it started recording.

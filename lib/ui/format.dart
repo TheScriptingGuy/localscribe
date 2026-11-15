@@ -7,6 +7,12 @@ String formatDuration(Duration d) {
   return h > 0 ? '$h:$m:$s' : '$m:$s';
 }
 
+/// Always hh:mm:ss, like the Plaud recorder screen: "00:00:30".
+String formatClock(Duration d) {
+  String two(int v) => v.toString().padLeft(2, '0');
+  return '${two(d.inHours)}:${two(d.inMinutes.remainder(60))}:${two(d.inSeconds.remainder(60))}';
+}
+
 String formatSeconds(double seconds) =>
     formatDuration(Duration(milliseconds: (seconds * 1000).round()));
 

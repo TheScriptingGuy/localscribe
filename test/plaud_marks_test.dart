@@ -130,6 +130,14 @@ void main() {
     });
   });
 
+  test('recordings are titled by their start time, like the Plaud app', () {
+    final t = DateTime.fromMillisecondsSinceEpoch(0x6afa1216 * 1000);
+    String two(int v) => v.toString().padLeft(2, '0');
+    expect(plaudTitle(0x6afa1216),
+        '${t.year}-${two(t.month)}-${two(t.day)} ${two(t.hour)}:${two(t.minute)}:${two(t.second)}');
+    expect(plaudTitle(1234), 'Plaud Note 4d2');
+  });
+
   test('file ids are start times in unix seconds', () {
     expect(fileIdTime(0x6af9e31a)!.toUtc().year, 2026);
     expect(fileIdTime(1234), isNull);

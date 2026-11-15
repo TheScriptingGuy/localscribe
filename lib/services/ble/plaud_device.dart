@@ -171,6 +171,57 @@ class PlaudDeviceSession extends ChangeNotifier {
   /// Audio received over BLE so far.
   int get liveReceivedMs => _live?.durationMs ?? 0;
 
+  /// Where in the recording "now" is, for a highlight, photo or note: the
+  /// audio received so far, which is how the Plaud app times them (verified:
+  /// a tap 31.6 s after start was labelled 00:00:30, the received position).
+  /// Falls back to the clock until audio arrives.
+  int get liveMarkMs {
+    final rx = liveReceivedMs;
+    return rx > 0 ? rx : _liveClock.elapsedMilliseconds;
+  }
+
+  bool _livePaused = false;
+  bool get livePaused => _livePaused;
+
+  /// op 0x15 `[fileId] 00` -> `[fileId][size:4] 00 01`. The recorder stops
+  /// writing until resumed; the stream simply runs dry.
+  Future<bool> pauseRecording() async {
+    final cmds = _liveCmds, fileId = _liveFileId;
+    if (cmds == null || fileId == null || _livePaused) return false;
+    try {
+      await _request(cmds, 0x15, [..._le32(fileId), 0x00]);
+      _livePaused = true;
+      _liveClock.stop();
+      _set(PlaudStatus.recording, 'Paused');
+      return true;
+    } catch (e) {
+      _log('pause failed: $e');
+      _set(PlaudStatus.recording, 'Could not pause: $e');
+      return false;
+    }
+  }
+
+  /// op 0x16 `[fileId] 00` -> `[fileId][size:4] 00 01` resumes recording
+  /// (0x14 start, 0x15 pause, 0x16 resume, 0x17 stop); then, like the Plaud
+  /// app, stream live again from the reported size.
+  Future<bool> resumeRecording() async {
+    final cmds = _liveCmds, fileId = _liveFileId;
+    if (cmds == null || fileId == null || !_livePaused) return false;
+    try {
+      final info = await _request(cmds, 0x16, [..._le32(fileId), 0x00]);
+      final size = info.length >= 8 ? _u32(info, 4) : 0;
+      await _sendCmd(cmds, 0x1c, [..._le32(fileId), ..._le32(size), ..._le32(0)]);
+      _livePaused = false;
+      _liveClock.start();
+      _set(PlaudStatus.recording, 'Recording');
+      return true;
+    } catch (e) {
+      _log('resume failed: $e');
+      _set(PlaudStatus.recording, 'Could not resume: $e');
+      return false;
+    }
+  }
+
   /// Fires with the time (ms) of each recorder-button highlight.
   final _markEvents = StreamController<int>.broadcast();
   Stream<int> get deviceMarks => _markEvents.stream;
@@ -192,6 +243,7 @@ class PlaudDeviceSession extends ChangeNotifier {
       final cmds = await _open(cred, dev);
       _liveCmds = cmds;
       _liveHeadSize = 0x280;
+      _livePaused = false;
       _set(PlaudStatus.recording, 'Starting…');
 
       final start = await _request(cmds, 0x14, const [0x01, 0x00],
@@ -227,6 +279,8 @@ class PlaudDeviceSession extends ChangeNotifier {
       // First block, then ask how far the recorder has got and stream from
       // there on. Waiting for the block's op 0x1d keeps the order the Plaud
       // app uses; a missing 0x1d only costs the timeout.
+      // (op 0x16 is "resume"; on a file that is already recording it just
+      // reports the size so far, which is how the Plaud app uses it here.)
       final firstEnd = _awaitFileEnd(fileId, const Duration(seconds: 4));
       await _sendCmd(cmds, 0x1c,
           [..._le32(fileId), ..._le32(0), ..._le32(_liveHeadSize)]);
@@ -244,7 +298,7 @@ class PlaudDeviceSession extends ChangeNotifier {
       }
       _liveHeadSize = from;
       await _sendCmd(cmds, 0x1c, [..._le32(fileId), ..._le32(from), ..._le32(0)]);
-      _set(PlaudStatus.recording, 'Recording on ${dev.name}');
+      _set(PlaudStatus.recording, 'Recording');
       return true;
     } catch (e) {
       _log('ERROR $e');
