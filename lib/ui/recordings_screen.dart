@@ -251,7 +251,10 @@ class _RecordingRow extends StatelessWidget {
                   style: TextStyle(
                       color: context.colors.muted, fontSize: 14, height: 1.3)),
             ],
-            if (t != null || r.transcript != null || r.notes.isNotEmpty) ...[
+            if (t != null ||
+                r.transcript != null ||
+                r.notes.isNotEmpty ||
+                r.markers.isNotEmpty) ...[
               const SizedBox(height: 10),
               Row(
                 children: [
@@ -273,6 +276,12 @@ class _RecordingRow extends StatelessWidget {
                         label: _speakerCount(r) == 1
                             ? '1 speaker'
                             : '${_speakerCount(r)} speakers',
+                      ),
+                    if (r.markers.isNotEmpty)
+                      _Badge(
+                        icon: Icons.flag_outlined,
+                        label:
+                            '${r.markers.length} highlight${r.markers.length == 1 ? '' : 's'}',
                       ),
                     if (r.notes.isNotEmpty)
                       _Badge(

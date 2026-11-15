@@ -103,18 +103,27 @@ void main() {
       expect(s.bytes, bytes);
     });
 
-    test('waits for a gap to be filled before scanning past it', () {
-      final tocs = List.filled(20, 0xb8)..[15] = 0xb9;
+    test('finds marks past the gap the live stream leaves after the header', () {
+      // Like the recorder: header + first bytes, then live from the current
+      // size; the gap is only filled by the re-read after stop.
+      final tocs = List.filled(40, 0xb8)..[30] = 0xb9;
       final bytes = _container(keys.publicKey, tocs, padding: 0);
       final s = PlaudLiveScanner(keys.privateKey);
-      s.add(0, Uint8List.sublistView(bytes, 0, 0x200));
-      // Skip the first unit; everything after it is pending.
-      s.add(0x200 + 80, Uint8List.sublistView(bytes, 0x200 + 80));
-      expect(s.marks, isEmpty);
-      expect(s.contiguousBytes, 0x200);
-      s.add(0x200, Uint8List.sublistView(bytes, 0x200, 0x200 + 80));
-      expect(s.marks, [300]);
+      const firstBlock = 640, liveFrom = 0x200 + 20 * 80;
+      for (var o = 0; o < firstBlock; o += 80) {
+        s.add(o, Uint8List.sublistView(bytes, o, o + 80));
+      }
+      for (var o = liveFrom; o < bytes.length; o += 80) {
+        s.add(o, Uint8List.sublistView(bytes, o, o + 80));
+      }
+      expect(s.marks, [600]);
+      expect(s.contiguousBytes, firstBlock);
+      expect(s.durationMs, 40 * 20); // furthest audio received
+      // The re-read after stop fills the gap.
+      s.add(0, Uint8List.sublistView(bytes, 0, liveFrom));
       expect(s.contiguousBytes, bytes.length);
+      expect(s.bytes, bytes);
+      expect(s.marks, [600]);
     });
   });
 

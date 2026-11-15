@@ -332,7 +332,7 @@ class PlaudDeviceSession extends ChangeNotifier {
       // Let the tail of the stream arrive.
       final deadline = DateTime.now().add(const Duration(seconds: 6));
       while (size > 0 &&
-          live.contiguousBytes < size &&
+          live.receivedEnd < size &&
           DateTime.now().isBefore(deadline)) {
         await _settle(ms: 200);
       }

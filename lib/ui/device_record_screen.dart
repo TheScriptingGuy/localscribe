@@ -271,7 +271,10 @@ class _DeviceRecordScreenState extends State<DeviceRecordScreen> {
               Row(children: [
                 Expanded(
                   child: Text('Stop recording?',
-                      style: Theme.of(ctx).textTheme.headlineMedium),
+                      style: Theme.of(ctx)
+                          .textTheme
+                          .headlineMedium
+                          ?.copyWith(fontWeight: FontWeight.w400)),
                 ),
                 IconButton(
                   icon: const Icon(Icons.close),
@@ -284,14 +287,18 @@ class _DeviceRecordScreenState extends State<DeviceRecordScreen> {
               const SizedBox(height: 24),
               FilledButton(
                 style: FilledButton.styleFrom(
-                    minimumSize: const Size.fromHeight(52)),
+                    minimumSize: const Size.fromHeight(56),
+                    shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(8))),
                 onPressed: () => Navigator.pop(ctx, true),
                 child: const Text('Stop and save'),
               ),
               const SizedBox(height: 12),
               OutlinedButton(
                 style: OutlinedButton.styleFrom(
-                    minimumSize: const Size.fromHeight(52)),
+                    minimumSize: const Size.fromHeight(56),
+                    shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(8))),
                 onPressed: () => Navigator.pop(ctx, false),
                 child: const Text('Continue recording'),
               ),
@@ -567,6 +574,9 @@ class _DeviceRecordScreenState extends State<DeviceRecordScreen> {
             controller: _noteCtrl,
             focusNode: _noteFocus,
             style: style,
+            // A single-line keyboard so Enter finishes the note (a multiline
+            // field would insert a line break instead).
+            keyboardType: TextInputType.text,
             maxLines: null,
             textCapitalization: TextCapitalization.sentences,
             textInputAction: TextInputAction.done,

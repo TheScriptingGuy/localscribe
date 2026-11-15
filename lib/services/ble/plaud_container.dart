@@ -138,60 +138,126 @@ class PlaudAudio {
 
 /// Finds highlight marks in a recording while it is still streaming in.
 ///
-/// Feed it the file bytes in order of arrival (by file offset); once the
-/// 0x200-byte header is in, it derives the keystream and checks each complete
-/// 80-byte unit's first byte. Units may arrive out of order or twice; bytes
-/// are kept by offset and only the contiguous prefix is scanned.
+/// Feed it the file bytes as they arrive (by file offset); once the
+/// 0x200-byte header is in, it derives the keystream and checks the first
+/// byte of every complete 80-byte unit. Bytes are kept by offset: the live
+/// stream jumps from the header to the current size, and that gap is only
+/// filled by the re-read after stop, so units are checked wherever they are.
 class PlaudLiveScanner {
   final RSAPrivateKey priv;
   final void Function(int atMs)? onMark;
   PlaudLiveScanner(this.priv, {this.onMark});
 
   Uint8List _buf = Uint8List(64 * 1024);
-  int _contiguous = 0; // bytes [0, _contiguous) are all present
-  final _pending = <int, Uint8List>{};
+  int _maxEnd = 0;
+
+  /// Received byte ranges, sorted, disjoint, merged: [start, end) pairs.
+  final _ranges = <List<int>>[];
   Uint8List? _ks;
-  int _scannedUnits = 0;
+
+  /// Per unit: 1 once its first byte has been checked.
+  Uint8List _scanned = Uint8List(4096);
   final List<int> marks = [];
 
+  /// End of the furthest bytes received.
+  int get receivedEnd => _maxEnd;
+
   /// Bytes received without gaps from offset 0.
-  int get contiguousBytes => _contiguous;
+  int get contiguousBytes =>
+      _ranges.isNotEmpty && _ranges.first[0] == 0 ? _ranges.first[1] : 0;
 
-  /// Audio length scanned so far.
-  int get durationMs => _scannedUnits * PlaudContainer.unitMs;
+  /// How far into the recording the received audio reaches. This is the
+  /// position the Plaud app gives highlights: the live stream skips from the
+  /// header to the current size (the gap is fetched after stop), so it is the
+  /// highest offset received, not the gap-free prefix.
+  int get durationMs {
+    final units =
+        (_maxEnd - PlaudContainer.headerSize) ~/ PlaudContainer.unitSize;
+    return units > 0 ? units * PlaudContainer.unitMs : 0;
+  }
 
-  /// The contiguous file bytes received so far.
-  Uint8List get bytes => Uint8List.sublistView(_buf, 0, _contiguous);
+  /// The gap-free file bytes received so far.
+  Uint8List get bytes => Uint8List.sublistView(_buf, 0, contiguousBytes);
 
   void add(int offset, Uint8List data) {
     if (data.isEmpty) return;
     final end = offset + data.length;
-    if (end <= _contiguous) {
-      // A re-read of bytes we already have (the header is re-read after
-      // stop): take the newest copy, the recorder may have finalised it.
-      _write(offset, data);
-      return;
-    }
-    if (offset > _contiguous) {
-      _pending[offset] = Uint8List.fromList(data);
-      return;
-    }
     _write(offset, data);
-    _contiguous = end;
-    // Pull in anything that was waiting for this gap to close.
-    var progressed = true;
-    while (progressed && _pending.isNotEmpty) {
-      progressed = false;
-      for (final o in _pending.keys.toList()) {
-        if (o <= _contiguous) {
-          final d = _pending.remove(o)!;
-          _write(o, d);
-          if (o + d.length > _contiguous) _contiguous = o + d.length;
-          progressed = true;
+    _cover(offset, end);
+    if (end > _maxEnd) _maxEnd = end;
+
+    if (_ks == null) {
+      if (contiguousBytes < PlaudContainer.headerSize) return;
+      try {
+        _ks = PlaudContainer(Uint8List.fromList(
+                Uint8List.sublistView(_buf, 0, PlaudContainer.headerSize)))
+            .keystream(priv);
+      } catch (_) {
+        return; // header not usable yet
+      }
+      // Everything that arrived before the header could be read.
+      for (final r in List.of(_ranges)) {
+        _scanRange(r[0], r[1]);
+      }
+      return;
+    }
+    _scanRange(offset, end);
+  }
+
+  /// Checks every unit lying fully inside received bytes around [from, to).
+  void _scanRange(int from, int to) {
+    const h = PlaudContainer.headerSize, u = PlaudContainer.unitSize;
+    final first = from <= h ? 0 : (from - h) ~/ u;
+    final last = (to - h) ~/ u; // exclusive
+    for (var k = first; k < last; k++) {
+      final off = h + k * u;
+      if (_isScanned(k) || !_covered(off, off + u)) continue;
+      _setScanned(k);
+      if ((_buf[off] ^ _ks![0]) == PlaudContainer.markToc) {
+        final at = k * PlaudContainer.unitMs;
+        var i = marks.length;
+        while (i > 0 && marks[i - 1] > at) {
+          i--;
         }
+        marks.insert(i, at);
+        onMark?.call(at);
       }
     }
-    _scan();
+  }
+
+  bool _isScanned(int k) => k < _scanned.length && _scanned[k] == 1;
+
+  void _setScanned(int k) {
+    if (k >= _scanned.length) {
+      var n = _scanned.length * 2;
+      while (n <= k) {
+        n *= 2;
+      }
+      _scanned = Uint8List(n)..setRange(0, _scanned.length, _scanned);
+    }
+    _scanned[k] = 1;
+  }
+
+  void _cover(int s, int e) {
+    var i = 0;
+    while (i < _ranges.length && _ranges[i][1] < s) {
+      i++;
+    }
+    var ns = s, ne = e;
+    while (i < _ranges.length && _ranges[i][0] <= ne) {
+      if (_ranges[i][0] < ns) ns = _ranges[i][0];
+      if (_ranges[i][1] > ne) ne = _ranges[i][1];
+      _ranges.removeAt(i);
+    }
+    _ranges.insert(i, [ns, ne]);
+  }
+
+  bool _covered(int s, int e) {
+    for (final r in _ranges) {
+      if (r[0] <= s && r[1] >= e) return true;
+      if (r[0] > s) return false;
+    }
+    return false;
   }
 
   void _write(int offset, Uint8List data) {
@@ -201,34 +267,9 @@ class PlaudLiveScanner {
       while (n < end) {
         n *= 2;
       }
-      _buf = Uint8List(n)..setRange(0, _contiguous, _buf);
+      _buf = Uint8List(n)..setRange(0, _buf.length, _buf);
     }
     _buf.setRange(offset, end, data);
-  }
-
-  void _scan() {
-    if (_ks == null) {
-      if (_contiguous < PlaudContainer.headerSize) return;
-      try {
-        _ks = PlaudContainer(Uint8List.fromList(
-                Uint8List.sublistView(_buf, 0, PlaudContainer.headerSize)))
-            .keystream(priv);
-      } catch (_) {
-        return; // header not usable yet
-      }
-    }
-    final ks0 = _ks![0];
-    while (true) {
-      final off = PlaudContainer.headerSize +
-          _scannedUnits * PlaudContainer.unitSize;
-      if (off + PlaudContainer.unitSize > _contiguous) break;
-      if ((_buf[off] ^ ks0) == PlaudContainer.markToc) {
-        final at = _scannedUnits * PlaudContainer.unitMs;
-        marks.add(at);
-        onMark?.call(at);
-      }
-      _scannedUnits++;
-    }
   }
 }
 
