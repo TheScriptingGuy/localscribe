@@ -48,6 +48,10 @@ class RecordingStore extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// Whether a recording with this Plaud recorder file id is already here.
+  bool hasDeviceFile(int fileId) =>
+      _items.any((r) => r.deviceFileId == fileId);
+
   File audioOf(Recording r) => File(p.join(_root.path, r.id, r.audioFile));
 
   /// The photo attached to [m], or null for markers without one.
@@ -72,6 +76,8 @@ class RecordingStore extends ChangeNotifier {
     bool move = false,
     List<RecordingMarker> markers = const [],
     Map<String, File> photos = const {},
+    DateTime? createdAt,
+    int? deviceFileId,
   }) async {
     final id = _uuid.v4();
     final dir = Directory(p.join(_root.path, id));
@@ -115,11 +121,12 @@ class RecordingStore extends ChangeNotifier {
     final rec = Recording(
       id: id,
       title: title,
-      createdAt: DateTime.now(),
+      createdAt: createdAt ?? DateTime.now(),
       audioFile: name,
       durationMs: durationMs,
       source: source,
       markers: saved,
+      deviceFileId: deviceFileId,
     );
     await _write(rec);
     _items.add(rec);

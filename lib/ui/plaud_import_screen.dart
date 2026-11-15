@@ -1,16 +1,11 @@
-import 'dart:io';
-
 import 'package:flutter/material.dart';
-import 'package:path/path.dart' as p;
-import 'package:path_provider/path_provider.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:provider/provider.dart';
 
-import '../models/recording.dart';
-import '../services/ble/plaud_container.dart';
 import '../services/ble/plaud_credentials.dart';
 import '../services/ble/plaud_crypto.dart';
 import '../services/ble/plaud_device.dart';
+import '../services/ble/plaud_import.dart';
 import '../services/library/recording_store.dart';
 import 'plaud_devices_screen.dart';
 import 'theme.dart';
@@ -61,37 +56,22 @@ class _PlaudImportScreenState extends State<PlaudImportScreen> {
       _running = true;
       _saved = 0;
     });
-    await _session.sync(cred, dev);
-    if (!mounted) return;
-    // Persist whatever came down.
     final store = context.read<RecordingStore>();
-    final tmp = await getTemporaryDirectory();
+    final have = {
+      for (final r in store.all)
+        if (r.deviceFileId != null) r.deviceFileId!,
+    };
+    await _session.sync(cred, dev, skip: have);
+    if (!mounted) return;
+    // Persist whatever came down: unmask the Opus, wrap it in Ogg so the
+    // normal decode -> transcribe path works, and keep the recorder's
+    // highlight marks.
     final pem = cred.rsaPrivateKeyPem;
     final priv = (pem == null || pem.isEmpty)
         ? null
         : PlaudCrypto.privateKeyFromPem(pem);
     for (final d in _session.downloads) {
-      final stem = 'plaud_${d.fileId.toRadixString(16)}';
-      // The container is Opus masked with a ChaCha20 keystream; unmask it and
-      // wrap the packets in Ogg so the normal decode → transcribe path works.
-      File f;
-      try {
-        if (priv == null) throw StateError('no RSA key loaded');
-        f = File(p.join(tmp.path, '$stem.opus'));
-        await f.writeAsBytes(
-            PlaudContainer(d.bytes).toOggOpus(priv), flush: true);
-      } catch (e) {
-        // Keep the raw container rather than losing the recording.
-        debugPrint('plaud: container decode failed for $stem: $e');
-        f = File(p.join(tmp.path, '$stem.plaud'));
-        await f.writeAsBytes(d.bytes, flush: true);
-      }
-      await store.add(
-        f,
-        title: 'Plaud Note ${d.fileId.toRadixString(16)}',
-        source: RecordingSource.plaud,
-        move: true,
-      );
+      await addPlaudRecording(store, priv, d);
       _saved++;
     }
     if (!mounted) return;
@@ -214,6 +194,8 @@ class _PlaudImportScreenState extends State<PlaudImportScreen> {
         PlaudStatus.connecting => 'Connecting',
         PlaudStatus.handshaking => 'Handshake',
         PlaudStatus.syncing => 'Syncing',
+        PlaudStatus.recording => 'Recording',
+        PlaudStatus.stopping => 'Stopping',
         PlaudStatus.done => 'Done',
         PlaudStatus.error => 'Error',
       };

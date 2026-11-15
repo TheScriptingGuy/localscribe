@@ -18,6 +18,7 @@ import '../services/models/whisper_models.dart';
 import '../services/transcription/live_captioner.dart';
 import '../settings/settings.dart';
 import 'format.dart';
+import 'record_widgets.dart';
 import 'recording_detail_screen.dart';
 import 'theme.dart';
 
@@ -350,15 +351,15 @@ class _RecordScreenState extends State<RecordScreen> {
                   Row(
                     mainAxisAlignment: MainAxisAlignment.spaceEvenly,
                     children: [
-                      _MarkerButton(
+                      MarkerButton(
                           icon: Icons.flag_outlined,
                           label: 'Highlight',
                           onPressed: _flag),
-                      _MarkerButton(
+                      MarkerButton(
                           icon: Icons.photo_camera_outlined,
                           label: 'Photo',
                           onPressed: _photo),
-                      _MarkerButton(
+                      MarkerButton(
                           icon: Icons.edit_note,
                           label: 'Note',
                           onPressed: _note),
@@ -383,7 +384,7 @@ class _RecordScreenState extends State<RecordScreen> {
                 const Spacer(),
                 if (!_recording)
                   Center(
-                    child: _RoundButton(
+                    child: RoundButton(
                       tooltip: 'Start recording',
                       icon: Icons.mic,
                       onPressed: _start,
@@ -403,7 +404,7 @@ class _RecordScreenState extends State<RecordScreen> {
                         onPressed: _confirmDiscard,
                         icon: const Icon(Icons.delete_outline),
                       ),
-                      _RoundButton(
+                      RoundButton(
                         tooltip: 'Stop and save',
                         icon: Icons.stop_rounded,
                         onPressed: _stop,
@@ -508,62 +509,6 @@ class _CaptionsPanel extends StatelessWidget {
               ),
             ),
         ],
-      ),
-    );
-  }
-}
-
-/// Small labelled button for marking a moment while recording.
-class _MarkerButton extends StatelessWidget {
-  final IconData icon;
-  final String label;
-  final VoidCallback onPressed;
-  const _MarkerButton(
-      {required this.icon, required this.label, required this.onPressed});
-
-  @override
-  Widget build(BuildContext context) {
-    return Column(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        IconButton.outlined(
-          tooltip: label,
-          iconSize: 26,
-          style: IconButton.styleFrom(fixedSize: const Size(56, 56)),
-          onPressed: onPressed,
-          icon: Icon(icon),
-        ),
-        const SizedBox(height: 4),
-        Text(label,
-            style: TextStyle(color: context.colors.muted, fontSize: 12)),
-      ],
-    );
-  }
-}
-
-class _RoundButton extends StatelessWidget {
-  final String tooltip;
-  final IconData icon;
-  final VoidCallback onPressed;
-  const _RoundButton(
-      {required this.tooltip, required this.icon, required this.onPressed});
-
-  @override
-  Widget build(BuildContext context) {
-    return Tooltip(
-      message: tooltip,
-      child: Material(
-        color: context.colors.text,
-        shape: const CircleBorder(),
-        clipBehavior: Clip.antiAlias,
-        child: InkWell(
-          onTap: onPressed,
-          child: SizedBox(
-            width: 88,
-            height: 88,
-            child: Icon(icon, color: context.colors.inverse, size: 40),
-          ),
-        ),
       ),
     );
   }

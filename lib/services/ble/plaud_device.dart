@@ -5,11 +5,22 @@ import 'dart:typed_data';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_reactive_ble/flutter_reactive_ble.dart';
 
+import 'plaud_container.dart';
 import 'plaud_credentials.dart';
 import 'plaud_crypto.dart';
 import 'plaud_protocol.dart';
 
-enum PlaudStatus { idle, scanning, connecting, handshaking, syncing, done, error }
+enum PlaudStatus {
+  idle,
+  scanning,
+  connecting,
+  handshaking,
+  syncing,
+  recording,
+  stopping,
+  done,
+  error
+}
 
 /// A recording pulled from the device: its file id and the raw `PLAUD.AI`
 /// container bytes (decrypted, reassembled).
@@ -17,6 +28,13 @@ class PlaudDownload {
   final int fileId;
   final Uint8List bytes;
   PlaudDownload(this.fileId, this.bytes);
+}
+
+/// A recording made live on the recorder: container bytes and the times
+/// (ms from start) the recorder's button marked highlights.
+class PlaudLiveRecording extends PlaudDownload {
+  final List<int> markMs;
+  PlaudLiveRecording(super.fileId, super.bytes, this.markMs);
 }
 
 /// Connects to the user's Plaud recorder over BLE, runs the verified handshake,
@@ -60,20 +78,13 @@ class PlaudDeviceSession extends ChangeNotifier {
 
   /// Full flow: scan → connect → handshake → sync. Credentials come from
   /// [cred]; [dev] is the target recorder (its public key is presented).
-  Future<void> sync(PlaudCredentials cred, PlaudDeviceCred dev) async {
+  /// Files whose id is in [skip] (already in the library) are not downloaded.
+  Future<void> sync(PlaudCredentials cred, PlaudDeviceCred dev,
+      {Set<int> skip = const {}}) async {
     downloads.clear();
-    // Reset session state so a re-connect starts a fresh handshake (a previous
-    // session's key/chunks otherwise cause "mac check failed" on the new one).
-    _keys = null;
-    _keyChunks.clear();
     try {
-      final priv = PlaudCrypto.privateKeyFromPem(cred.rsaPrivateKeyPem!);
-      final id = await _scan(dev.serial);
-      _deviceId = id;
-      await _connect(id);
-      await _subscribe(id);
-      await _handshake(dev.publicKey, priv);
-      await _runSync(cred.userId ?? '');
+      final cmds = await _open(cred, dev);
+      await _runSync(cmds, skip);
       _set(PlaudStatus.done, 'Synced ${downloads.length} recording(s)');
     } catch (e) {
       _log('ERROR $e');
@@ -82,6 +93,251 @@ class PlaudDeviceSession extends ChangeNotifier {
       await _cleanup();
     }
   }
+
+  /// Scan, connect, handshake, then the session setup the Plaud app does on
+  /// every connect (auth, device info, ops 0x19/0x18).
+  Future<PlaudCommands> _open(PlaudCredentials cred, PlaudDeviceCred dev) async {
+    // Reset session state so a re-connect starts a fresh handshake (a previous
+    // session's key/chunks otherwise cause "mac check failed" on the new one).
+    _keys = null;
+    _keyChunks.clear();
+    _connected = false;
+    final priv = PlaudCrypto.privateKeyFromPem(cred.rsaPrivateKeyPem!);
+    final id = await _scan(dev.serial);
+    _deviceId = id;
+    await _connect(id);
+    await _subscribe(id);
+    await _handshake(dev.publicKey, priv);
+
+    _set(PlaudStatus.handshaking, 'Setting up…');
+    final cmds = PlaudCommands(_keys!);
+    await _sendCmd(cmds, 0x01, [0x02, 0x00, 0x00, ...(cred.userId ?? '').codeUnits]);
+    await _settle();
+    await _sendCmd(cmds, 0x6c, const []);
+    await _settle();
+    // ops 0x19 then 0x18, verified against the real app's capture
+    // (findings/decoded_live_capture.txt): OUT 0x19 content=00 -> IN 0x22
+    // content=00, OUT 0x18 content=(empty) -> IN 0x21 content=00. Without
+    // these the recorder was free to auto-start a new recording as soon as
+    // it was connected. The Plaud app sends them on every connect, including
+    // before it starts a recording.
+    await _sendCmd(cmds, 0x19, const [0x00]);
+    await _settle();
+    await _sendCmd(cmds, 0x18, const []);
+    await _settle();
+    return cmds;
+  }
+
+  /// Sends [op] and waits for the recorder's control reply with [replyOp]
+  /// (default: the same op). Returns the reply content.
+  Future<Uint8List> _request(PlaudCommands cmds, int op, List<int> content,
+      {int? replyOp, Duration timeout = const Duration(seconds: 8)}) async {
+    final want = replyOp ?? op;
+    final reply = Completer<Uint8List>();
+    final sub = _frames.stream.listen((f) {
+      if (f.isControl && f.op == want && !reply.isCompleted) {
+        reply.complete(f.content);
+      }
+    });
+    try {
+      await _sendCmd(cmds, op, content);
+      return await reply.future.timeout(timeout,
+          onTimeout: () => throw TimeoutException(
+              'no reply to op 0x${op.toRadixString(16)}'));
+    } finally {
+      await sub.cancel();
+    }
+  }
+
+  // ------------------------------------------------------- live recording
+
+  PlaudCommands? _liveCmds;
+  PlaudLiveScanner? _live;
+  StreamSubscription<PlaudFrame>? _liveSub;
+  int? _liveFileId;
+  int _liveHeadSize = 0x280;
+  final Stopwatch _liveClock = Stopwatch();
+  bool _connected = false;
+
+  /// File id of the recording in progress (its start time, unix seconds).
+  int? get liveFileId => _liveFileId;
+
+  /// Time since the recorder confirmed it started.
+  Duration get liveElapsed => _liveClock.elapsed;
+
+  /// Highlight marks made with the recorder's button so far, ms from start.
+  List<int> get liveMarks => List.unmodifiable(_live?.marks ?? const <int>[]);
+
+  /// Audio received over BLE so far.
+  int get liveReceivedMs => _live?.durationMs ?? 0;
+
+  /// Fires with the time (ms) of each recorder-button highlight.
+  final _markEvents = StreamController<int>.broadcast();
+  Stream<int> get deviceMarks => _markEvents.stream;
+
+  /// Connects and tells the recorder to start recording, then streams the
+  /// recording in as it is made, the way the Plaud app does (verified with
+  /// Frida, findings/plaud-device-recording.md):
+  ///
+  ///   op 0x14 `01 00`          -> reply `[fileId:4] 00 02 00 00 00 01`
+  ///   op 0x03                  status (`03 ...` = recording)
+  ///   op 0x1c fileId, 0, 0x280 first block (header), ends with op 0x1d
+  ///   op 0x16 fileId, 00       -> `[fileId:4][size:4]...` bytes so far
+  ///   op 0x1c fileId, size, 0  stream everything from there on, live
+  ///
+  /// Returns false (with [message] set) if it could not start.
+  Future<bool> startRecording(PlaudCredentials cred, PlaudDeviceCred dev) async {
+    try {
+      final priv = PlaudCrypto.privateKeyFromPem(cred.rsaPrivateKeyPem!);
+      final cmds = await _open(cred, dev);
+      _liveCmds = cmds;
+      _liveHeadSize = 0x280;
+      _set(PlaudStatus.recording, 'Starting…');
+
+      final start = await _request(cmds, 0x14, const [0x01, 0x00],
+          timeout: const Duration(seconds: 6));
+      if (start.length < 4) throw StateError('unexpected start reply ${_hex(start)}');
+      final fileId = _u32(start, 0);
+      _liveFileId = fileId;
+      _liveClock
+        ..reset()
+        ..start();
+      _log('recording started, file ${fileId.toRadixString(16)}');
+
+      final live = PlaudLiveScanner(priv, onMark: (ms) {
+        _log('recorder highlight at ${ms}ms');
+        _markEvents.add(ms);
+        notifyListeners();
+      });
+      _live = live;
+      var lastNotify = 0;
+      _liveSub = _frames.stream.listen((f) {
+        if (f.isData && f.fileId == fileId && f.offset < 0x10000000) {
+          live.add(f.offset, f.data);
+          // Repaint about once a second, not per 20 ms unit.
+          if (live.durationMs - lastNotify >= 1000) {
+            lastNotify = live.durationMs;
+            notifyListeners();
+          }
+        }
+      });
+
+      await _sendCmd(cmds, 0x03, const []);
+      await _settle(ms: 100);
+      // First block, then ask how far the recorder has got and stream from
+      // there on. Waiting for the block's op 0x1d keeps the order the Plaud
+      // app uses; a missing 0x1d only costs the timeout.
+      final firstEnd = _awaitFileEnd(fileId, const Duration(seconds: 4));
+      await _sendCmd(cmds, 0x1c,
+          [..._le32(fileId), ..._le32(0), ..._le32(_liveHeadSize)]);
+      await firstEnd;
+      var from = _liveHeadSize;
+      try {
+        final info = await _request(cmds, 0x16, [..._le32(fileId), 0x00],
+            timeout: const Duration(seconds: 4));
+        if (info.length >= 8) {
+          final size = _u32(info, 4);
+          if (size > 0) from = size;
+        }
+      } catch (e) {
+        _log('op 0x16 failed ($e); streaming from $from');
+      }
+      _liveHeadSize = from;
+      await _sendCmd(cmds, 0x1c, [..._le32(fileId), ..._le32(from), ..._le32(0)]);
+      _set(PlaudStatus.recording, 'Recording on ${dev.name}');
+      return true;
+    } catch (e) {
+      _log('ERROR $e');
+      _set(PlaudStatus.error, '$e');
+      await _endLive();
+      await _cleanup();
+      return false;
+    }
+  }
+
+  /// Stops the recorder and returns the finished recording (container bytes
+  /// plus the recorder-button marks), or null if it could not be retrieved
+  /// (it then stays on the recorder for a later sync).
+  Future<PlaudLiveRecording?> stopRecording() async {
+    final cmds = _liveCmds;
+    final fileId = _liveFileId;
+    final live = _live;
+    if (cmds == null || fileId == null || live == null) return null;
+    _liveClock.stop();
+    try {
+      if (!_connected) {
+        throw StateError('lost the connection to the recorder; it keeps '
+            'recording until you stop it on the recorder, then sync');
+      }
+      _set(PlaudStatus.stopping, 'Stopping…');
+      final reply = await _request(cmds, 0x17, const [0x01, 0x00]);
+      // `[fileId:4] 02 01 [size:4]`
+      final size = reply.length >= 10 ? _u32(reply, 6) : 0;
+      _log('recording stopped, size=$size');
+
+      // Let the tail of the stream arrive.
+      final deadline = DateTime.now().add(const Duration(seconds: 6));
+      while (size > 0 &&
+          live.contiguousBytes < size &&
+          DateTime.now().isBefore(deadline)) {
+        await _settle(ms: 200);
+      }
+      // The Plaud app re-reads the start of the file after stop; do the same
+      // so a header the recorder finalised at stop is the one we keep.
+      final headEnd = _awaitFileEnd(fileId, const Duration(seconds: 4));
+      await _sendCmd(cmds, 0x1c, [
+        ..._le32(fileId),
+        ..._le32(0),
+        ..._le32(size > 0 && size < _liveHeadSize ? size : _liveHeadSize),
+      ]);
+      await headEnd;
+
+      Uint8List bytes;
+      if (size > 0 && live.contiguousBytes < size) {
+        _log('stream incomplete (${live.contiguousBytes}/$size); downloading');
+        await _endLive();
+        bytes = await _download(cmds, fileId, size) ?? live.bytes;
+      } else {
+        bytes = Uint8List.fromList(size > 0
+            ? Uint8List.sublistView(live.bytes, 0, size)
+            : live.bytes);
+      }
+      final result = PlaudLiveRecording(fileId, bytes, List.of(live.marks));
+      _set(PlaudStatus.done, 'Recording saved');
+      return result;
+    } catch (e) {
+      _log('ERROR $e');
+      _set(PlaudStatus.error, '$e');
+      return null;
+    } finally {
+      await _endLive();
+      await _cleanup();
+    }
+  }
+
+  /// Completes when the recorder signals the end of a block for [fileId]
+  /// (op 0x1d `[fileId] ffff`), or after [timeout].
+  Future<void> _awaitFileEnd(int fileId, Duration timeout) {
+    final done = Completer<void>();
+    late final StreamSubscription<PlaudFrame> sub;
+    sub = _frames.stream.listen((f) {
+      if (f.isControl && f.op == 0x1d && f.content.length >= 4 &&
+          _u32(f.content, 0) == fileId && !done.isCompleted) {
+        done.complete();
+      }
+    });
+    return done.future
+        .timeout(timeout, onTimeout: () {})
+        .whenComplete(() => sub.cancel());
+  }
+
+  Future<void> _endLive() async {
+    await _liveSub?.cancel();
+    _liveSub = null;
+  }
+
+  static int _u32(Uint8List b, int o) =>
+      b[o] | (b[o + 1] << 8) | (b[o + 2] << 16) | (b[o + 3] << 24);
 
   /// Pull a device serial out of the manufacturer data (same extraction as
   /// `PlaudDevicesScreen._serialIn`). The serial is NOT ASCII text — it's 9
@@ -170,9 +426,18 @@ class PlaudDeviceSession extends ChangeNotifier {
       connectionTimeout: const Duration(seconds: 15),
     ).listen((u) {
       _log('conn ${u.connectionState}');
-      if (u.connectionState == DeviceConnectionState.connected &&
-          !completer.isCompleted) {
-        completer.complete();
+      if (u.connectionState == DeviceConnectionState.connected) {
+        _connected = true;
+        if (!completer.isCompleted) completer.complete();
+      } else if (u.connectionState == DeviceConnectionState.disconnected) {
+        final wasLive = _connected && status == PlaudStatus.recording;
+        _connected = false;
+        if (wasLive) {
+          // The recorder keeps recording on its own; say so instead of
+          // pretending the session is still live.
+          _set(PlaudStatus.recording,
+              'Connection lost. The recorder keeps recording; stop it there and sync later.');
+        }
       }
     }, onError: (e) {
       if (!completer.isCompleted) completer.completeError(e);
@@ -219,8 +484,12 @@ class PlaudDeviceSession extends ChangeNotifier {
         _log('IN ctrl seq=${f.seq} op=0x${f.op.toRadixString(16)} '
             'st=${f.status} content=${_hex(f.content)}');
       } else if (f.isData) {
-        _log('IN data seq=${f.seq} fileId=0x${f.fileId.toRadixString(16)} '
-            'off=${f.offset} len=${f.dataLen} head=${_hexHead(f.data)}');
+        // Data arrives 50 frames a second while a recording streams in; log
+        // about one in a hundred so the log (and listeners) aren't flooded.
+        if (f.seq % 100 == 0 || f.offset >= 0x10000000) {
+          _log('IN data seq=${f.seq} fileId=0x${f.fileId.toRadixString(16)} '
+              'off=${f.offset} len=${f.dataLen} head=${_hexHead(f.data)}');
+        }
       } else {
         _log('IN type=${f.type} ${_hex(pt)}');
       }
@@ -271,25 +540,8 @@ class PlaudDeviceSession extends ChangeNotifier {
     throw TimeoutException('no wrapped-key response (key not enrolled?)');
   }
 
-  Future<void> _runSync(String userId) async {
+  Future<void> _runSync(PlaudCommands cmds, Set<int> skip) async {
     _set(PlaudStatus.syncing, 'Requesting recordings…');
-    final cmds = PlaudCommands(_keys!);
-
-    await _sendCmd(cmds, 0x01, [0x02, 0x00, 0x00, ...userId.codeUnits]);
-    await _settle();
-    await _sendCmd(cmds, 0x6c, const []);
-    await _settle();
-
-    // ops 0x19 then 0x18, verified against the real app's capture
-    // (findings/decoded_live_capture.txt): OUT 0x19 content=00 -> IN 0x22
-    // content=00, OUT 0x18 content=(empty) -> IN 0x21 content=00. LocalScribe
-    // never sent these, which left the recorder free to auto-start a new
-    // recording as soon as it was connected — these appear to be the
-    // official app's "entering sync, don't record" signal.
-    await _sendCmd(cmds, 0x19, const [0x00]);
-    await _settle();
-    await _sendCmd(cmds, 0x18, const []);
-    await _settle();
 
     // op 0x1a = list pending files, verified against a live capture of the
     // real app (findings/decoded_live_capture.txt): content =
@@ -332,18 +584,23 @@ class PlaudDeviceSession extends ChangeNotifier {
         _log('skipping ${e.fileId.toRadixString(16)}: size=0 (still recording)');
         continue;
       }
-      await _download(cmds, e.fileId, e.size);
+      if (skip.contains(e.fileId)) {
+        _log('skipping ${e.fileId.toRadixString(16)}: already in the library');
+        continue;
+      }
+      final bytes = await _download(cmds, e.fileId, e.size);
+      if (bytes != null) downloads.add(PlaudDownload(e.fileId, bytes));
     }
   }
 
-  Future<void> _download(PlaudCommands cmds, int fileId, int knownSize) async {
+  Future<Uint8List?> _download(PlaudCommands cmds, int fileId, int knownSize) async {
     // Never issue an unbounded request (e.g. a 0x7FFFFFFF blockSize) — without
     // a known size there is no way to tell a finished file from one the
     // recorder is still actively writing, and requesting "everything" against
     // a live recording downloads for as long as the mic stays on.
     if (knownSize <= 0) {
       _log('refusing to download ${fileId.toRadixString(16)}: unknown size');
-      return;
+      return null;
     }
     _set(PlaudStatus.syncing, 'Downloading ${fileId.toRadixString(16)}…');
     final asm = PlaudFileAssembler(fileId);
@@ -417,11 +674,10 @@ class PlaudDeviceSession extends ChangeNotifier {
 
     await sub.cancel();
     final bytes = asm.assemble();
-    if (bytes.isNotEmpty) {
-      downloads.add(PlaudDownload(fileId, bytes));
-      _log('downloaded ${fileId.toRadixString(16)}: ${bytes.length}B '
-          'magic=${String.fromCharCodes(bytes.take(8))}');
-    }
+    if (bytes.isEmpty) return null;
+    _log('downloaded ${fileId.toRadixString(16)}: ${bytes.length}B '
+        'magic=${String.fromCharCodes(bytes.take(8))}');
+    return bytes;
   }
 
   static List<int> _le32(int v) =>
@@ -431,6 +687,9 @@ class PlaudDeviceSession extends ChangeNotifier {
       Future<void>.delayed(Duration(milliseconds: ms));
 
   Future<void> _cleanup() async {
+    _liveCmds = null;
+    _live = null;
+    _liveFileId = null;
     await _notifySub?.cancel();
     await _connSub?.cancel();
     await _scanSub?.cancel();
@@ -456,8 +715,10 @@ class PlaudDeviceSession extends ChangeNotifier {
 
   @override
   void dispose() {
+    _endLive();
     _cleanup();
     _frames.close();
+    _markEvents.close();
     super.dispose();
   }
 }

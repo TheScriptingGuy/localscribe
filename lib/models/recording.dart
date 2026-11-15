@@ -106,6 +106,10 @@ class Recording {
   /// Names given to recognised speakers, by speaker id ("S1" -> "Anna").
   final Map<String, String> speakerNames;
 
+  /// For recordings from a Plaud recorder: the recorder's file id (its start
+  /// time in unix seconds), so a sync can skip files already in the library.
+  final int? deviceFileId;
+
   Recording({
     required this.id,
     required this.title,
@@ -118,6 +122,7 @@ class Recording {
     List<ChatMessage>? chat,
     List<RecordingMarker>? markers,
     Map<String, String>? speakerNames,
+    this.deviceFileId,
   })  : notes = notes ?? [],
         chat = chat ?? [],
         markers = markers ?? [],
@@ -162,6 +167,7 @@ class Recording {
         'chat': chat.map((m) => m.toJson()).toList(),
         if (markers.isNotEmpty) 'markers': markers.map((m) => m.toJson()).toList(),
         if (speakerNames.isNotEmpty) 'speakerNames': speakerNames,
+        if (deviceFileId != null) 'deviceFileId': deviceFileId,
       };
 
   factory Recording.fromJson(Map<String, dynamic> j) => Recording(
@@ -186,5 +192,6 @@ class Recording {
             .map((e) => RecordingMarker.fromJson(Map<String, dynamic>.from(e)))
             .toList(),
         speakerNames: Map<String, String>.from(j['speakerNames'] ?? const {}),
+        deviceFileId: (j['deviceFileId'] as num?)?.toInt(),
       );
 }

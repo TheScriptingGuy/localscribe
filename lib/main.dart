@@ -13,6 +13,7 @@ import 'services/notes/note_jobs.dart';
 import 'services/templates/template_repository.dart';
 import 'services/transcription/transcription_jobs.dart';
 import 'settings/settings.dart';
+import 'ui/device_record_screen.dart';
 import 'ui/plaud_devices_screen.dart';
 import 'ui/record_screen.dart';
 import 'ui/recordings_screen.dart';
@@ -151,6 +152,8 @@ class _RootShellState extends State<RootShell> {
   static const _pages = [RecordingsScreen(), TemplatesScreen()];
 
   Future<void> _newRecording() async {
+    final cred = context.read<PlaudCredentials>();
+    final recorders = cred.isConfigured ? cred.devices : const <PlaudDeviceCred>[];
     final choice = await showModalBottomSheet<String>(
       context: context,
       showDragHandle: true,
@@ -166,6 +169,13 @@ class _RootShellState extends State<RootShell> {
                 subtitle: 'Capture with the phone microphone',
                 onTap: () => Navigator.pop(ctx, 'record'),
               ),
+              for (final d in recorders)
+                _SheetAction(
+                  icon: Icons.settings_remote_outlined,
+                  title: 'Record on ${d.name}',
+                  subtitle: 'Start your Plaud recorder from here, with highlights',
+                  onTap: () => Navigator.pop(ctx, 'device:${d.serial}'),
+                ),
               _SheetAction(
                 icon: Icons.upload_file_outlined,
                 title: 'Import audio',
@@ -184,6 +194,14 @@ class _RootShellState extends State<RootShell> {
       ),
     );
     if (!mounted) return;
+    if (choice != null && choice.startsWith('device:')) {
+      final dev = cred.deviceBySerial(choice.substring('device:'.length));
+      if (dev != null) {
+        Navigator.of(context).push(MaterialPageRoute(
+            builder: (_) => DeviceRecordScreen(device: dev)));
+      }
+      return;
+    }
     switch (choice) {
       case 'record':
         Navigator.of(context)

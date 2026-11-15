@@ -75,30 +75,161 @@ class PlaudContainer {
     return out;
   }
 
-  /// Decrypt to the bare Opus packets, in order.
+  /// Milliseconds of audio per unit.
+  static const int unitMs = 20;
+
+  /// The recorder's highlight mark: when the record button is pressed briefly
+  /// during a recording, the firmware writes the unit at that moment with TOC
+  /// `0xb9` instead of `0xb8` (verified with Frida against the Plaud app:
+  /// one press -> exactly one such unit, at the press time).
+  static const int markToc = 0xb9;
+
+  /// A decrypted first byte that belongs to audio: the normal TOC or a mark.
+  static bool isAudioToc(int toc) => toc == _toc || toc == markToc;
+
+  /// Decrypt to the bare Opus packets, in order, plus the highlight times.
   ///
   /// Stops at the first unit that does not decrypt to a valid TOC, which is how
-  /// the zero padding after the audio is trimmed.
-  List<Uint8List> opusPackets(RSAPrivateKey priv) {
+  /// the zero padding after the audio is trimmed. Mark units are restored to
+  /// the normal TOC so they decode like every other packet.
+  PlaudAudio decode(RSAPrivateKey priv) {
     if (!looksValid) throw StateError('not a PLAUD.AI container');
     if (declaredUnitSize != unitSize) {
       throw StateError('unexpected unit size: $declaredUnitSize');
     }
     final ks = keystream(priv);
     final packets = <Uint8List>[];
+    final marks = <int>[];
     for (var off = headerSize; off + unitSize <= bytes.length; off += unitSize) {
-      if ((bytes[off] ^ ks[0]) != _toc) break; // padding / end of audio
+      final toc = bytes[off] ^ ks[0];
+      if (!isAudioToc(toc)) break; // padding / end of audio
       final pkt = Uint8List(unitSize);
       for (var i = 0; i < unitSize; i++) {
         pkt[i] = bytes[off + i] ^ ks[i];
       }
+      if (toc == markToc) {
+        marks.add(packets.length * unitMs);
+        pkt[0] = _toc;
+      }
       packets.add(pkt);
     }
-    return packets;
+    return PlaudAudio(packets, marks);
   }
+
+  /// Decrypt to the bare Opus packets, in order (see [decode]).
+  List<Uint8List> opusPackets(RSAPrivateKey priv) => decode(priv).packets;
 
   /// Full conversion: container bytes -> a playable/decodable Ogg Opus file.
   Uint8List toOggOpus(RSAPrivateKey priv) => _oggOpus(opusPackets(priv));
+
+  /// Ogg Opus bytes for already-decoded packets.
+  static Uint8List oggOpusOf(List<Uint8List> packets) => _oggOpus(packets);
+}
+
+/// Decoded recording: Opus packets (20 ms each) and the times, in ms from the
+/// start, where the recorder's button marked a highlight.
+class PlaudAudio {
+  final List<Uint8List> packets;
+  final List<int> markMs;
+  const PlaudAudio(this.packets, this.markMs);
+
+  int get durationMs => packets.length * PlaudContainer.unitMs;
+}
+
+/// Finds highlight marks in a recording while it is still streaming in.
+///
+/// Feed it the file bytes in order of arrival (by file offset); once the
+/// 0x200-byte header is in, it derives the keystream and checks each complete
+/// 80-byte unit's first byte. Units may arrive out of order or twice; bytes
+/// are kept by offset and only the contiguous prefix is scanned.
+class PlaudLiveScanner {
+  final RSAPrivateKey priv;
+  final void Function(int atMs)? onMark;
+  PlaudLiveScanner(this.priv, {this.onMark});
+
+  Uint8List _buf = Uint8List(64 * 1024);
+  int _contiguous = 0; // bytes [0, _contiguous) are all present
+  final _pending = <int, Uint8List>{};
+  Uint8List? _ks;
+  int _scannedUnits = 0;
+  final List<int> marks = [];
+
+  /// Bytes received without gaps from offset 0.
+  int get contiguousBytes => _contiguous;
+
+  /// Audio length scanned so far.
+  int get durationMs => _scannedUnits * PlaudContainer.unitMs;
+
+  /// The contiguous file bytes received so far.
+  Uint8List get bytes => Uint8List.sublistView(_buf, 0, _contiguous);
+
+  void add(int offset, Uint8List data) {
+    if (data.isEmpty) return;
+    final end = offset + data.length;
+    if (end <= _contiguous) {
+      // A re-read of bytes we already have (the header is re-read after
+      // stop): take the newest copy, the recorder may have finalised it.
+      _write(offset, data);
+      return;
+    }
+    if (offset > _contiguous) {
+      _pending[offset] = Uint8List.fromList(data);
+      return;
+    }
+    _write(offset, data);
+    _contiguous = end;
+    // Pull in anything that was waiting for this gap to close.
+    var progressed = true;
+    while (progressed && _pending.isNotEmpty) {
+      progressed = false;
+      for (final o in _pending.keys.toList()) {
+        if (o <= _contiguous) {
+          final d = _pending.remove(o)!;
+          _write(o, d);
+          if (o + d.length > _contiguous) _contiguous = o + d.length;
+          progressed = true;
+        }
+      }
+    }
+    _scan();
+  }
+
+  void _write(int offset, Uint8List data) {
+    final end = offset + data.length;
+    if (end > _buf.length) {
+      var n = _buf.length * 2;
+      while (n < end) {
+        n *= 2;
+      }
+      _buf = Uint8List(n)..setRange(0, _contiguous, _buf);
+    }
+    _buf.setRange(offset, end, data);
+  }
+
+  void _scan() {
+    if (_ks == null) {
+      if (_contiguous < PlaudContainer.headerSize) return;
+      try {
+        _ks = PlaudContainer(Uint8List.fromList(
+                Uint8List.sublistView(_buf, 0, PlaudContainer.headerSize)))
+            .keystream(priv);
+      } catch (_) {
+        return; // header not usable yet
+      }
+    }
+    final ks0 = _ks![0];
+    while (true) {
+      final off = PlaudContainer.headerSize +
+          _scannedUnits * PlaudContainer.unitSize;
+      if (off + PlaudContainer.unitSize > _contiguous) break;
+      if ((_buf[off] ^ ks0) == PlaudContainer.markToc) {
+        final at = _scannedUnits * PlaudContainer.unitMs;
+        marks.add(at);
+        onMark?.call(at);
+      }
+      _scannedUnits++;
+    }
+  }
 }
 
 // ---------------------------------------------------------------- Ogg muxing
