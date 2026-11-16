@@ -67,6 +67,11 @@ class _DeviceRecordScreenState extends State<DeviceRecordScreen> {
     _noteFocus.addListener(() {
       if (!_noteFocus.hasFocus) _commitNote();
     });
+    // Like the Plaud app, "Record" starts the recorder right away; the idle
+    // view only shows progress, or a retry after a failure.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) _start();
+    });
   }
 
   void _onSession() {
@@ -98,6 +103,7 @@ class _DeviceRecordScreenState extends State<DeviceRecordScreen> {
   }
 
   Future<void> _start() async {
+    if (_starting || _recording) return;
     if (!await _ensurePermissions()) {
       setState(() => _error = 'Bluetooth permission is required.');
       return;
@@ -361,7 +367,7 @@ class _DeviceRecordScreenState extends State<DeviceRecordScreen> {
                     ),
                   )
                 : RoundButton(
-                    tooltip: 'Start recording',
+                    tooltip: 'Try again',
                     icon: Icons.fiber_manual_record,
                     onPressed: _start),
           ),

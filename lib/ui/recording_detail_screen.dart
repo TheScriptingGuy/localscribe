@@ -37,6 +37,9 @@ class _RecordingDetailScreenState extends State<RecordingDetailScreen> {
   /// Which generated note the Notes tab shows (index into rec.notes).
   int _noteIndex = 0;
 
+  /// Notes shows the Highlights view instead of a generated note.
+  bool _showHighlights = false;
+
   @override
   void initState() {
     super.initState();
@@ -64,6 +67,7 @@ class _RecordingDetailScreenState extends State<RecordingDetailScreen> {
     setState(() {
       _error = null;
       _noteIndex = 0; // the new note goes first
+      _showHighlights = false;
     });
     context.read<NoteJobs>().generate(rec, choice);
   }
@@ -360,13 +364,6 @@ class _RecordingDetailScreenState extends State<RecordingDetailScreen> {
         const Divider(height: 1),
         _PlayerBar(player: _player, fallbackDuration: rec.duration),
         const Divider(height: 1),
-        MarkerList(
-          rec: rec,
-          onSeek: (m) {
-            _player.seek(Duration(milliseconds: m.atMs));
-            _player.play();
-          },
-        ),
         const SizedBox(height: 12),
         content,
       ],
@@ -381,7 +378,8 @@ class _RecordingDetailScreenState extends State<RecordingDetailScreen> {
       groupTranscriptParagraphs(rec, segments);
 
   Widget _notesTab(Recording rec, NoteJobs notes) {
-    if (rec.transcript == null) {
+    final hasMarkers = rec.markers.isNotEmpty;
+    if (rec.transcript == null && !hasMarkers) {
       return const _CallToAction(
         text: 'Transcribe the recording first, then generate notes from any '
             'template.',
@@ -398,22 +396,70 @@ class _RecordingDetailScreenState extends State<RecordingDetailScreen> {
             ),
           )
         : null;
-    if (rec.notes.isEmpty) {
-      return progress != null
-          ? ListView(children: [progress])
-          : _CallToAction(
-              text: 'Turn the transcript into a summary, meeting minutes or '
-                  'any other template.',
-              button: FilledButton.icon(
-                onPressed: () => _pickTemplate(rec),
-                icon: const Icon(Icons.auto_awesome, size: 20),
-                label: const Text('Generate note'),
-              ),
-            );
+    final generateCta = _CallToAction(
+      text: 'Turn the transcript into a summary, meeting minutes or '
+          'any other template.',
+      button: FilledButton.icon(
+        onPressed: () => _pickTemplate(rec),
+        icon: const Icon(Icons.auto_awesome, size: 20),
+        label: const Text('Generate note'),
+      ),
+    );
+    if (rec.notes.isEmpty && !hasMarkers) {
+      return progress != null ? ListView(children: [progress]) : generateCta;
     }
 
+    // Like the Plaud app: Highlights | <notes> | +
+    final showHighlights =
+        hasMarkers && (_showHighlights || rec.transcript == null);
     final index = _noteIndex < rec.notes.length ? _noteIndex : 0;
-    final note = rec.notes[index];
+    final Widget body;
+    if (showHighlights) {
+      body = Builder(
+        builder: (ctx) => MarkerList(
+          rec: rec,
+          onSeek: (m) {
+            _player.seek(Duration(milliseconds: m.atMs));
+            _player.play();
+            DefaultTabController.of(ctx).animateTo(0);
+          },
+        ),
+      );
+    } else if (rec.notes.isEmpty) {
+      body = progress != null ? const SizedBox.shrink() : generateCta;
+    } else {
+      final note = rec.notes[index];
+      body = ListView(
+        padding: const EdgeInsets.fromLTRB(24, 16, 24, 32),
+        children: [
+          MarkdownView(note.content),
+          const SizedBox(height: 16),
+          const Divider(height: 1),
+          Row(
+            children: [
+              Expanded(
+                child: Text(
+                  (note.auto ? 'Auto · ' : '') +
+                      formatRelativeDate(note.createdAt),
+                  style: TextStyle(color: context.colors.muted),
+                ),
+              ),
+              IconButton(
+                tooltip: 'Copy',
+                icon: const Icon(Icons.copy_outlined, size: 20),
+                onPressed: () => _copy(note.content, 'Note'),
+              ),
+              IconButton(
+                tooltip: 'Delete',
+                icon: const Icon(Icons.delete_outline, size: 20),
+                onPressed: () => _deleteNote(rec, note),
+              ),
+            ],
+          ),
+        ],
+      );
+    }
+
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
@@ -423,69 +469,49 @@ class _RecordingDetailScreenState extends State<RecordingDetailScreen> {
             scrollDirection: Axis.horizontal,
             padding: const EdgeInsets.symmetric(horizontal: 14),
             children: [
+              if (hasMarkers)
+                _NoteTab(
+                  label: 'Highlights',
+                  selected: showHighlights,
+                  onTap: () => setState(() => _showHighlights = true),
+                ),
               for (var i = 0; i < rec.notes.length; i++)
                 _NoteTab(
                   label: rec.notes[i].templateName,
-                  selected: i == index,
-                  onTap: () => setState(() => _noteIndex = i),
+                  selected: !showHighlights && i == index,
+                  onTap: () => setState(() {
+                    _showHighlights = false;
+                    _noteIndex = i;
+                  }),
                 ),
-              Center(
-                child: Material(
-                  color: context.colors.fill,
-                  borderRadius: BorderRadius.circular(8),
-                  child: InkWell(
+              if (rec.transcript != null)
+                Center(
+                  child: Material(
+                    color: context.colors.fill,
                     borderRadius: BorderRadius.circular(8),
-                    onTap: generating ? null : () => _pickTemplate(rec),
-                    child: SizedBox(
-                      width: 48,
-                      height: 32,
-                      child: generating
-                          ? const Center(
-                              child: SizedBox(
-                                  width: 16,
-                                  height: 16,
-                                  child: CircularProgressIndicator(
-                                      strokeWidth: 2)))
-                          : const Icon(Icons.add, size: 22),
+                    child: InkWell(
+                      borderRadius: BorderRadius.circular(8),
+                      onTap: generating ? null : () => _pickTemplate(rec),
+                      child: SizedBox(
+                        width: 48,
+                        height: 32,
+                        child: generating
+                            ? const Center(
+                                child: SizedBox(
+                                    width: 16,
+                                    height: 16,
+                                    child: CircularProgressIndicator(
+                                        strokeWidth: 2)))
+                            : const Icon(Icons.add, size: 22),
+                      ),
                     ),
                   ),
                 ),
-              ),
             ],
           ),
         ),
-        if (progress != null) progress,
-        Expanded(
-          child: ListView(
-            padding: const EdgeInsets.fromLTRB(24, 16, 24, 32),
-            children: [
-              MarkdownView(note.content),
-              const SizedBox(height: 16),
-              const Divider(height: 1),
-              Row(
-                children: [
-                  Expanded(
-                    child: Text(
-                      (note.auto ? 'Auto · ' : '') +
-                          formatRelativeDate(note.createdAt),
-                      style: TextStyle(color: context.colors.muted),
-                    ),
-                  ),
-                  IconButton(
-                    tooltip: 'Copy',
-                    icon: const Icon(Icons.copy_outlined, size: 20),
-                    onPressed: () => _copy(note.content, 'Note'),
-                  ),
-                  IconButton(
-                    tooltip: 'Delete',
-                    icon: const Icon(Icons.delete_outline, size: 20),
-                    onPressed: () => _deleteNote(rec, note),
-                  ),
-                ],
-              ),
-            ],
-          ),
-        ),
+        if (progress != null && !showHighlights) progress,
+        Expanded(child: body),
       ],
     );
   }

@@ -4,11 +4,15 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import '../../models/recording.dart';
+import '../../services/ai/ai_types.dart';
 import '../../services/library/recording_store.dart';
+import '../../services/notes/highlights.dart';
 import '../format.dart';
 import '../theme.dart';
 
-/// Highlights, photos and notes marked while recording; tap one to jump there.
+/// The Notes > Highlights view, like the Plaud app's: each highlight, photo
+/// and note marked while recording, with what was said just before it.
+/// Tap one to play from there.
 class MarkerList extends StatelessWidget {
   final Recording rec;
   final void Function(RecordingMarker marker) onSeek;
@@ -16,84 +20,106 @@ class MarkerList extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    if (rec.markers.isEmpty) return const SizedBox.shrink();
     final c = context.colors;
     final store = context.read<RecordingStore>();
     final markers = [...rec.markers]..sort((a, b) => a.atMs.compareTo(b.atMs));
+    final segments = rec.transcript?.segments ?? const [];
 
-    return Padding(
-      padding: const EdgeInsets.only(top: 16, bottom: 4),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text('Highlights', style: Theme.of(context).textTheme.titleMedium),
-          const SizedBox(height: 8),
-          for (final m in markers)
-            InkWell(
-              borderRadius: BorderRadius.circular(10),
-              onTap: () => onSeek(m),
-              child: Padding(
-                padding: const EdgeInsets.symmetric(vertical: 8),
-                child: Row(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Icon(_icon(m.type), size: 20, color: c.muted),
-                    const SizedBox(width: 10),
-                    Text(
-                      formatDuration(Duration(milliseconds: m.atMs)),
-                      style: TextStyle(
-                        color: c.muted,
-                        fontSize: 14,
-                        fontFeatures: const [FontFeature.tabularFigures()],
-                      ),
-                    ),
-                    const SizedBox(width: 12),
-                    Expanded(
-                      child: Text(
-                        m.text ?? _label(m.type),
-                        style: const TextStyle(fontSize: 15, height: 1.35),
-                      ),
-                    ),
-                    if (store.photoOf(rec, m) case final File photo)
-                      Padding(
-                        padding: const EdgeInsets.only(left: 12),
-                        child: GestureDetector(
-                          onTap: () => _showPhoto(context, photo),
-                          child: ClipRRect(
-                            borderRadius: BorderRadius.circular(8),
-                            child: Image.file(photo,
-                                width: 64,
-                                height: 64,
-                                fit: BoxFit.cover,
-                                cacheWidth: 200,
-                                errorBuilder: (_, __, ___) => Container(
-                                    width: 64,
-                                    height: 64,
-                                    color: c.fill,
-                                    child: Icon(Icons.broken_image_outlined,
-                                        color: c.muted))),
+    return ListView(
+      padding: const EdgeInsets.fromLTRB(24, 8, 24, 32),
+      children: [
+        for (final m in markers)
+          InkWell(
+            borderRadius: BorderRadius.circular(10),
+            onTap: () => onSeek(m),
+            child: Padding(
+              padding: const EdgeInsets.symmetric(vertical: 12),
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Icon(_icon(m.type), size: 22, color: c.text),
+                  const SizedBox(width: 14),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          // Rounded like the live timeline (29.7 s -> 00:00:30).
+                          formatClock(
+                              Duration(seconds: (m.atMs / 1000).round())),
+                          style: TextStyle(
+                            color: c.muted,
+                            fontSize: 14,
+                            fontFeatures: const [FontFeature.tabularFigures()],
                           ),
                         ),
-                      ),
-                  ],
-                ),
+                        const SizedBox(height: 4),
+                        ..._body(context, m, segments, store),
+                      ],
+                    ),
+                  ),
+                ],
               ),
             ),
-          const SizedBox(height: 8),
-          const Divider(height: 1),
-        ],
-      ),
+          ),
+      ],
     );
+  }
+
+  List<Widget> _body(BuildContext context, RecordingMarker m,
+      List<TranscriptSegment> segments, RecordingStore store) {
+    final c = context.colors;
+    const main = TextStyle(fontSize: 17, height: 1.4);
+    final note = m.text?.trim() ?? '';
+    final excerpt = highlightExcerpt(segments, m.atMs);
+    return [
+      if (m.type == MarkerType.note && note.isNotEmpty)
+        Text(note, style: main)
+      else if (m.type != MarkerType.photo || excerpt.isEmpty)
+        Text(_label(m.type), style: main),
+      if (store.photoOf(rec, m) case final File photo)
+        Padding(
+          padding: const EdgeInsets.only(top: 6),
+          child: GestureDetector(
+            onTap: () => _showPhoto(context, photo),
+            child: ClipRRect(
+              borderRadius: BorderRadius.circular(10),
+              child: Image.file(photo,
+                  height: 160,
+                  fit: BoxFit.cover,
+                  cacheHeight: 480,
+                  errorBuilder: (_, __, ___) => Container(
+                      width: 64,
+                      height: 64,
+                      color: c.fill,
+                      child: Icon(Icons.broken_image_outlined,
+                          color: c.muted))),
+            ),
+          ),
+        ),
+      if (excerpt.isNotEmpty)
+        Padding(
+          padding: const EdgeInsets.only(top: 6),
+          child: Text('“$excerpt”',
+              style: TextStyle(fontSize: 15, height: 1.45, color: c.muted)),
+        )
+      else if (rec.transcript == null && m.type == MarkerType.flag)
+        Padding(
+          padding: const EdgeInsets.only(top: 4),
+          child: Text('Transcribe the recording to see what was said here.',
+              style: TextStyle(fontSize: 14, color: c.faint)),
+        ),
+    ];
   }
 
   static IconData _icon(MarkerType t) => switch (t) {
         MarkerType.flag => Icons.flag_outlined,
         MarkerType.photo => Icons.photo_camera_outlined,
-        MarkerType.note => Icons.edit_note,
+        MarkerType.note => Icons.edit_outlined,
       };
 
   static String _label(MarkerType t) => switch (t) {
-        MarkerType.flag => 'Highlight',
+        MarkerType.flag => 'Highlighted',
         MarkerType.photo => 'Photo',
         MarkerType.note => 'Note',
       };

@@ -6,6 +6,8 @@ import 'package:localscribe/services/ble/plaud_container.dart';
 import 'package:localscribe/services/ble/plaud_crypto.dart';
 import 'package:localscribe/services/ble/plaud_import.dart';
 import 'package:localscribe/models/recording.dart';
+import 'package:localscribe/services/ai/ai_types.dart';
+import 'package:localscribe/services/notes/highlights.dart';
 import 'package:pointycastle/export.dart';
 
 /// A throwaway RSA-2048 key pair (the container's wrapped key is 256 bytes).
@@ -150,5 +152,35 @@ void main() {
   test('file ids are start times in unix seconds', () {
     expect(fileIdTime(0x6af9e31a)!.toUtc().year, 2026);
     expect(fileIdTime(1234), isNull);
+  });
+
+  group('highlightExcerpt', () {
+    const segs = [
+      TranscriptSegment(start: 0, end: 5, text: ' Welcome everyone.'),
+      TranscriptSegment(start: 12, end: 18, text: ' The budget is approved.'),
+      TranscriptSegment(start: 18, end: 25, text: ' We ship in March.'),
+      TranscriptSegment(start: 31, end: 35, text: ' Any questions?'),
+    ];
+
+    test('is what was said in the 20 s before the mark', () {
+      expect(highlightExcerpt(segs, 30000),
+          'The budget is approved. We ship in March.');
+      // A segment running through the mark is included.
+      expect(highlightExcerpt(segs, 20000),
+          'Welcome everyone. The budget is approved. We ship in March.');
+      expect(highlightExcerpt(segs, 60000), isEmpty);
+      expect(highlightExcerpt(const [], 30000), isEmpty);
+    });
+
+    test('keeps the end when it is long', () {
+      final long = [
+        for (var i = 0; i < 20; i++)
+          TranscriptSegment(start: i.toDouble(), end: i + 1.0, text: 'word$i and more'),
+      ];
+      final e = highlightExcerpt(long, 20000, maxChars: 40);
+      expect(e.startsWith('…'), isTrue);
+      expect(e.endsWith('word19 and more'), isTrue);
+      expect(e.length, lessThanOrEqualTo(41));
+    });
   });
 }
