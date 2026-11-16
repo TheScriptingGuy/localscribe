@@ -185,7 +185,14 @@ class _RecordingsScreenState extends State<RecordingsScreen> {
   }
 
   Widget _filterChip(String label, RecordingSource? source) => ChoiceChip(
-        label: Text(label),
+        // Explicit colour: the theme's state-dependent label style is not
+        // applied to unselected chips, which left them white on grey.
+        label: Text(label,
+            style: TextStyle(
+                fontSize: 13,
+                color: _source == source
+                    ? context.colors.inverse
+                    : context.colors.text)),
         selected: _source == source,
         showCheckmark: false,
         onSelected: (_) => setState(() => _source = source),

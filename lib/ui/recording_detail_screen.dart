@@ -37,8 +37,9 @@ class _RecordingDetailScreenState extends State<RecordingDetailScreen> {
   /// Which generated note the Notes tab shows (index into rec.notes).
   int _noteIndex = 0;
 
-  /// Notes shows the Highlights view instead of a generated note.
-  bool _showHighlights = false;
+  /// Notes shows the Highlights view instead of a generated note; null =
+  /// automatic (Highlights until a note has been generated).
+  bool? _showHighlights;
 
   @override
   void initState() {
@@ -410,8 +411,9 @@ class _RecordingDetailScreenState extends State<RecordingDetailScreen> {
     }
 
     // Like the Plaud app: Highlights | <notes> | +
-    final showHighlights =
-        hasMarkers && (_showHighlights || rec.transcript == null);
+    final showHighlights = hasMarkers &&
+        (rec.transcript == null ||
+            (_showHighlights ?? rec.notes.isEmpty));
     final index = _noteIndex < rec.notes.length ? _noteIndex : 0;
     final Widget body;
     if (showHighlights) {
