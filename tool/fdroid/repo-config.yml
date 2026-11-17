@@ -1,0 +1,18 @@
+# fdroidserver config for the self-hosted LocalScribe repository (GitHub
+# Pages). Used by the publish-fdroid-repo CI job; the keystore and its
+# password come from the FDROID_KEYSTORE_* secrets.
+repo_url: https://thescriptingguy.github.io/localscribe/repo
+repo_name: LocalScribe
+repo_icon: icon.png
+repo_description: >-
+  LocalScribe releases, built by GitHub Actions from
+  https://github.com/TheScriptingGuy/localscribe and signed with the
+  developer's release key.
+archive_older: 0
+keystore: keystore.p12
+repo_keyalias: localscribe-repo
+keystorepass:
+  env: FDROID_KEYSTORE_PASS
+keypass:
+  env: FDROID_KEYSTORE_PASS
+keydname: CN=LocalScribe F-Droid repo, O=LocalScribe

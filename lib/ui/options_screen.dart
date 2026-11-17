@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import '../models/ai_config.dart';
+import '../services/diarization/local_diarizer.dart'
+    show localDiarizerAvailable;
 import '../services/models/llm_models.dart';
 import '../services/models/model_manager.dart';
 import '../services/models/speaker_models.dart';
@@ -188,8 +190,13 @@ class _OptionsScreenState extends State<OptionsScreen> {
                 settings.save();
               },
             ),
-            if (sp.onDevice)
+            if (sp.onDevice && localDiarizerAvailable)
               _speakerModelsTile(context)
+            else if (sp.onDevice)
+              const _Hint(
+                  'On-device speaker recognition is not part of this build '
+                  '(F-Droid only ships libraries it builds itself). Switch to '
+                  'a custom API URL, or use the GitHub build.')
             else ...[
               _field('Speaker API URL', sp.remote.baseUrl,
                   hint: 'http://192.168.1.20:8090',

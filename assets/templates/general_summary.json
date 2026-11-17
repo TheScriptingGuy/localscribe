@@ -3,7 +3,7 @@
   "name": "General Summary",
   "description": "A concise, faithful summary of any recording.",
   "verbatim": false,
-  "source": "Generic default (not Plaud-specific).",
+  "source": "Original LocalScribe template.",
   "outline": [
     "Produce a faithful, concise summary of the recording without adding information.",
     "Start with a 2-4 sentence overview of the main subject and outcome.",

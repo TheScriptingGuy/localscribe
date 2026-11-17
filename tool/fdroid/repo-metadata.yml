@@ -1,0 +1,12 @@
+# App metadata for the self-hosted F-Droid repository. Descriptions and
+# screenshots come from fastlane/metadata/android.
+Categories:
+  - Multimedia
+  - Writing
+License: MIT
+SourceCode: https://github.com/TheScriptingGuy/localscribe
+IssueTracker: https://github.com/TheScriptingGuy/localscribe/issues
+AntiFeatures:
+  NonFreeNet:
+    en-US: Setting up a Plaud Note recorder signs in to Plaud's servers once to fetch the recorder's key (optional).
+AutoName: LocalScribe

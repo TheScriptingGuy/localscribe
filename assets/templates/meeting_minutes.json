@@ -1,17 +1,17 @@
 {
   "id": "meeting_minutes",
   "name": "Meeting Minutes",
-  "description": "Clear, structured minutes with actions. Prioritizes comprehensive capture over summarization.",
-  "verbatim": true,
-  "source": "Recovered verbatim from Plaud template DIM-MEETING-DETAILS (outline field).",
+  "description": "Thorough, structured minutes: what was discussed, what was decided and who does what by when.",
+  "verbatim": false,
+  "source": "Original LocalScribe template.",
   "outline": [
-    "The primary purpose is to extract content from a transcription and generate a meeting summary based on specified formats and requirements.",
-    "The summary should focus on objective facts, decisions, times, data, and action items.",
-    "Key points from the meeting are to be listed in chronological order.",
-    "Important decisions made during the meeting are to be listed in chronological order.",
-    "Tasks discussed in the meeting are to be presented in a table with columns for Task, Responsible Party, Deadline, and Notes.",
-    "Key deadlines mentioned in the meeting are to be listed with the format: - **Time**: Task to be completed.",
-    "Major follow-up actions from the meeting are to be listed."
+    "Write minutes of the meeting from the transcript; capture everything of substance rather than condensing it into a short summary.",
+    "Stick to what was actually said: facts, figures, dates and decisions, without adding interpretation.",
+    "Walk through the discussion in the order it happened, one bullet per topic or point raised.",
+    "Record each decision separately, in the order it was taken.",
+    "Put the agreed work in a table with the columns Task, Owner, Due and Notes; leave a cell empty when the transcript does not say.",
+    "List any dates or deadlines that came up as '- **<date or time>**: <what is due>'.",
+    "End with the open questions and follow-ups that still need attention."
   ],
   "sections": [
     "Summary",

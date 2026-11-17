@@ -19,6 +19,11 @@ import '../ai/ai_types.dart';
 import '../transcription/transcriber.dart';
 import 'diarizer.dart';
 
+/// Whether on-device speaker recognition is in this build. The F-Droid build
+/// swaps this file for tool/fdroid/local_diarizer_stub.dart (sherpa-onnx
+/// ships prebuilt onnxruntime libraries, which F-Droid does not allow).
+const bool localDiarizerAvailable = true;
+
 /// Speaker recognition on the phone: MediaCodec decode (localscribe_native),
 /// then sherpa-onnx (pyannote segmentation + WeSpeaker embeddings +
 /// clustering). Audio never leaves the device.

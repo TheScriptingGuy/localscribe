@@ -3,7 +3,7 @@
   "name": "To-Do List",
   "description": "Transform a conversation or ideas into a structured to-do list.",
   "verbatim": false,
-  "source": "Reconstructed from Plaud community template 'To-Do List'.",
+  "source": "Original LocalScribe template.",
   "outline": [
     "Extract every actionable task mentioned or implied in the transcript.",
     "Present tasks as a checklist using '- [ ] ' markdown checkboxes.",

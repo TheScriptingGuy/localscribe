@@ -1,15 +1,17 @@
 # LocalScribe
 
 A **local-first** voice-recording → transcription → AI-notes app for Android,
-inspired by the Plaud Note app's feature set but **talking to no Plaud servers**.
+inspired by the Plaud Note app's feature set. It needs **no Plaud account**;
+Plaud's servers are only contacted if you choose to set up a Plaud recorder
+(see *Plaud recorder* below).
 All processing happens either **on-device** or against an **AI API URL you
 configure** (OpenAI / Anthropic / Whisper-compatible).
 
 This project is a clean-room **reimplementation from protocol knowledge**, not a
 copy of Plaud's code. Interoperability research on the author's own device
-informs two things only: the default note **templates** (their section/outline
-schemas) and the optional **Plaud BLE device** integration (GATT layout + crypto
-construction).
+informs the optional **Plaud BLE device** integration only (GATT layout, crypto
+construction and the recording container). The bundled note templates are
+LocalScribe's own.
 
 > **Disclaimer — study project, not affiliated with Plaud**
 >
@@ -18,7 +20,8 @@ construction).
 > Plaud Inc. or any of its subsidiaries. "Plaud" and "Plaud Note" are
 > trademarks of their respective owners and are used here only to describe
 > compatibility (nominative use). This project contains no Plaud source code,
-> binaries, assets, or credentials, and it does not connect to Plaud servers.
+> binaries, assets, or credentials. It only connects to Plaud servers when you
+> set up a Plaud recorder and sign in with your own Plaud account (see below).
 > Use it only with devices and accounts you own, and at your own risk; it is
 > provided "as is" without warranty of any kind (see `LICENSE`).
 
@@ -127,12 +130,34 @@ vLLM, LocalAI, OpenRouter, Groq — just change the base URL.
 
 ### Templates → prompts
 
-Plaud ships template **metadata** (name, description, and an `outline` of the
-sections to produce); the actual LLM prompt is server-side and never shipped. So
-LocalScribe stores the same `outline`/section schema and **synthesizes the LLM
-prompt locally** from it (see `services/templates/prompt_builder.dart`). Default
-templates live in `assets/templates/`; `meeting_minutes.json` uses the outline
-recovered verbatim, the rest are reconstructed from their published descriptions.
+A template is a name, a description and an `outline` of the sections to
+produce; LocalScribe **synthesizes the LLM prompt locally** from it (see
+`services/templates/prompt_builder.dart`). The bundled templates in
+`assets/templates/` are original LocalScribe templates.
+
+## Plaud recorder (optional)
+
+To talk to a Plaud Note recorder over Bluetooth, LocalScribe needs the
+recorder's key, which lives in your Plaud account. Setting up a recorder signs
+in to Plaud's servers **once, with your own account**, to fetch that key and
+the list of your recorders; it can also list and download recordings stored in
+your Plaud cloud if you ask it to. Nothing is uploaded. After that, syncing
+and recording on the recorder happen over Bluetooth only. If you never set up
+a recorder, the app never contacts Plaud.
+
+## Install
+
+- **F-Droid repository:** open https://thescriptingguy.github.io/localscribe/ on
+  the phone and tap *Add to F-Droid*, or add
+  `https://thescriptingguy.github.io/localscribe/repo?fingerprint=D30B86E5C958166DD741DE3D386073EBA6709222F839376657614A281DDB63DF`
+  in F-Droid (Settings > Repositories). New versions appear there when a
+  `v*` tag is pushed.
+- **APK:** each CI run uploads the `localscribe-apk` artifact (see below).
+
+The F-Droid build of LocalScribe (built by F-Droid itself) leaves out
+on-device speaker recognition: `sherpa-onnx` ships prebuilt onnxruntime
+libraries, which F-Droid does not allow. `tool/fdroid/prepare.sh` makes that
+variant; the remote speaker API still works there.
 
 ## Build (cloud CI)
 
