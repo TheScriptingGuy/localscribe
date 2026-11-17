@@ -124,6 +124,8 @@ class LiveCaptioner extends ChangeNotifier {
         .where((s) => (s['text'] as String? ?? '').trim().isNotEmpty)
         .toList();
     final seconds = snapshot.length / _bytesPerSecond;
+    debugPrint('captions: whisper ${seconds.toStringAsFixed(1)} s -> '
+        '${segments.map((s) => s['text']).join(' | ')}'); // TEMP diagnosis
 
     if (segments.isEmpty) {
       // Silence: keep only the last couple of seconds of context.
