@@ -1,0 +1,183 @@
+{
+  "repo": {
+    "name": {
+      "en-US": "LocalScribe"
+    },
+    "description": {
+      "en-US": "LocalScribe releases, built by GitHub Actions from https://github.com/TheScriptingGuy/localscribe and signed with the developer's release key."
+    },
+    "icon": {
+      "en-US": {
+        "name": "/icons/icon.png",
+        "sha256": "de9e16af3e7bc1d70fa05b6291af4ecc98a84494e5cdddf87bbb0132ce2fa3d4",
+        "size": 846
+      }
+    },
+    "address": "https://thescriptingguy.github.io/localscribe/repo",
+    "timestamp": 1794906326000,
+    "categories": {
+      "Multimedia": {
+        "name": {
+          "en-US": "Multimedia"
+        }
+      },
+      "Writing": {
+        "name": {
+          "en-US": "Writing"
+        }
+      }
+    }
+  },
+  "packages": {
+    "ai.localscribe.localscribe": {
+      "metadata": {
+        "added": 1794906324000,
+        "categories": [
+          "Multimedia",
+          "Writing"
+        ],
+        "issueTracker": "https://github.com/TheScriptingGuy/localscribe/issues",
+        "lastUpdated": 1794906324000,
+        "license": "MIT",
+        "sourceCode": "https://github.com/TheScriptingGuy/localscribe",
+        "screenshots": {
+          "phone": {
+            "en-US": [
+              {
+                "name": "/ai.localscribe.localscribe/en-US/phoneScreenshots/1_library.png",
+                "sha256": "9261b312aa582b341303187ab3eb7f844a4bf2cc23f426ffec6b37523379f35f",
+                "size": 149297
+              },
+              {
+                "name": "/ai.localscribe.localscribe/en-US/phoneScreenshots/2_recording.png",
+                "sha256": "0aeeb7ecaa7d0ac785995e7cd71d5da9ab2baa659e0e0a079bcd7b3282841356",
+                "size": 103947
+              },
+              {
+                "name": "/ai.localscribe.localscribe/en-US/phoneScreenshots/3_highlights.png",
+                "sha256": "dce51fa7294f5b2bda383c64476865b3b20100c70303b17bf1fdfd5ae58a6eca",
+                "size": 108979
+              },
+              {
+                "name": "/ai.localscribe.localscribe/en-US/phoneScreenshots/4_templates.png",
+                "sha256": "38e484cf275d7d38f67568a2470ca0687e0e59a3fe0767920828a7431197d3c1",
+                "size": 155389
+              },
+              {
+                "name": "/ai.localscribe.localscribe/en-US/phoneScreenshots/5_transcript_dark.png",
+                "sha256": "8fd68834f19aa1e94c99758c8d55781925c6b0c9e436ddeb18b49a62a5db8608",
+                "size": 110039
+              }
+            ]
+          }
+        },
+        "name": {
+          "en-US": "LocalScribe"
+        },
+        "summary": {
+          "en-US": "Record, transcribe and summarise on your phone. Optional Plaud Note support."
+        },
+        "description": {
+          "en-US": "<p>LocalScribe records conversations, meetings and lectures, transcribes them and turns them into notes, all on your phone. Nothing is uploaded unless you point it at an AI server of your own choice.</p>\n\n<p><b>Features</b></p>\n<ul>\n<li>Record with the phone microphone (keeps running with the screen off) or import audio files.</li>\n<li>Mark highlights, take photos and type notes while recording.</li>\n<li>On-device transcription with whisper.cpp, in many languages, including mixed-language recordings.</li>\n<li>Speaker recognition (who spoke when).</li>\n<li>AI notes from 30 templates (meeting minutes, lecture notes, interviews, to-do lists and more), or write your own. Runs on the phone with llama.cpp, or on an OpenAI-compatible or Anthropic API you configure (Ollama, LM Studio, vLLM and others work too).</li>\n<li>Ask questions about a recording.</li>\n<li>Export transcripts and notes as TXT, Markdown, SRT, DOCX or PDF, and audio as WAV.</li>\n<li>Light and dark theme.</li>\n</ul>\n\n<p><b>Plaud Note recorder (optional)</b></p>\n<p>If you own a Plaud Note recorder, LocalScribe can sync its recordings over Bluetooth and start, pause and stop recordings on it, including highlights made with the recorder's button. Setting this up signs in to Plaud's servers once with your own Plaud account to fetch your recorder's key; after that everything goes over Bluetooth. If you do not use a Plaud recorder, the app never contacts Plaud. LocalScribe is not affiliated with Plaud.</p>\n\n<p><b>Models</b></p>\n<p>Speech and AI models are downloaded inside the app when you choose to use them (from Hugging Face). They are not included in the app.</p>\n\n<p>In the F-Droid build, on-device speaker recognition is not included because its library is only available prebuilt; a self-hosted speaker recognition server can be used instead.</p>\n"
+        },
+        "icon": {
+          "en-US": {
+            "name": "/ai.localscribe.localscribe/en-US/icon_HBahMCBYDOrzrhT0GmQoj9490zSN8644zPhzqPW4tlU=.png",
+            "sha256": "1c16a13020580ceaf3ae14f41a64288fde3dd3348df3ae38ccf873a8f5b8b655",
+            "size": 9858
+          }
+        },
+        "preferredSigner": "3193d7dee34c96ff1e7f05e82e69dc6c68df755686b75115b79392de8e362bd9"
+      },
+      "versions": {
+        "fa9b912ea0cb7f27e845cc74c82bbda2a471fac91f1c395abf1aecf997c8fabf": {
+          "added": 1794906324000,
+          "file": {
+            "name": "/ai.localscribe.localscribe_2002.apk",
+            "sha256": "fa9b912ea0cb7f27e845cc74c82bbda2a471fac91f1c395abf1aecf997c8fabf",
+            "size": 58589265
+          },
+          "manifest": {
+            "nativecode": [
+              "arm64-v8a"
+            ],
+            "versionName": "0.2.0",
+            "versionCode": 2002,
+            "usesSdk": {
+              "minSdkVersion": 24,
+              "targetSdkVersion": 36
+            },
+            "signer": {
+              "sha256": [
+                "3193d7dee34c96ff1e7f05e82e69dc6c68df755686b75115b79392de8e362bd9"
+              ]
+            },
+            "usesPermission": [
+              {
+                "name": "android.permission.INTERNET"
+              },
+              {
+                "name": "android.permission.RECORD_AUDIO"
+              },
+              {
+                "name": "android.permission.BLUETOOTH",
+                "maxSdkVersion": 30
+              },
+              {
+                "name": "android.permission.BLUETOOTH_ADMIN",
+                "maxSdkVersion": 30
+              },
+              {
+                "name": "android.permission.BLUETOOTH_SCAN"
+              },
+              {
+                "name": "android.permission.BLUETOOTH_CONNECT"
+              },
+              {
+                "name": "android.permission.ACCESS_FINE_LOCATION",
+                "maxSdkVersion": 30
+              },
+              {
+                "name": "android.permission.FOREGROUND_SERVICE"
+              },
+              {
+                "name": "android.permission.FOREGROUND_SERVICE_MICROPHONE"
+              },
+              {
+                "name": "android.permission.FOREGROUND_SERVICE_DATA_SYNC"
+              },
+              {
+                "name": "android.permission.POST_NOTIFICATIONS"
+              },
+              {
+                "name": "android.permission.WAKE_LOCK"
+              },
+              {
+                "name": "android.permission.RECEIVE_BOOT_COMPLETED"
+              },
+              {
+                "name": "android.permission.ACCESS_NETWORK_STATE"
+              },
+              {
+                "name": "ai.localscribe.localscribe.DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION"
+              }
+            ],
+            "usesPermissionSdk23": [
+              {
+                "name": "android.permission.ACCESS_COARSE_LOCATION"
+              },
+              {
+                "name": "android.permission.ACCESS_FINE_LOCATION"
+              }
+            ]
+          },
+          "antiFeatures": {
+            "NonFreeNet": {
+              "en-US": "Setting up a Plaud Note recorder signs in to Plaud's servers once to fetch the recorder's key (optional)."
+            }
+          }
+        }
+      }
+    }
+  }
+}

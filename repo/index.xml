@@ -1,0 +1,60 @@
+<?xml version="1.0" encoding="utf-8"?>
+<fdroid>
+	<repo icon="icon.png" name="LocalScribe" pubkey="30820500308202e8a003020102021416d722fac09f80a6caae702bb9fe5c7f3a9eb47a300d06092a864886f70d01010b050030393121301f06035504030c184c6f63616c53637269626520462d44726f6964207265706f31143012060355040a0c0b4c6f63616c5363726962653020170d3236313131363038313133325a180f32303536313130393038313133325a30393121301f06035504030c184c6f63616c53637269626520462d44726f6964207265706f31143012060355040a0c0b4c6f63616c53637269626530820222300d06092a864886f70d01010105000382020f003082020a0282020100bc631101ead40efb5bd59e4c14722faaf5d0b6f24a151dba72d8f0827687c0b4fa3385f3905c6d52689902ef96bb8c6b190f0794ac759025be591ea4eb04556ca5246f0e5b176759ce12d29aae7316c24982c2240cd4cd18840a3ce688a8928573b5339bb6d14969a4cebbd5b2b9abdd76fbd99402ad23df12e854376e20fd31473abe917b5b5a465c575215d7840b3fce616ecc3b7b390ee75502b7d126bea92619af6815cb144fdce290e00a510bf812f4e859af67cdba70301fcbd1a6220f03ab644254f7ef00be48e81aacee35928e1a471afa8ac9689224ef7645ee7582a5e471619204d1acc52534b4e12e65948f94478274412d36466e3b14ac04d8c3e766ed403f310afad150e7fcfbdcdeaee9aef19377fbc78892d48e351891f024fe7f05fd1221b3ab277cb6d4b9d4b0845aafe976ca28aa3057455c3e9d698c7c86a02a63d8b5492c2bed18a93ce3ef359f32a596898d8cfbd254f4025bb6f719e257f805540d5691adafcce119e22edab7d3c82fa0bc43e7623361c8d3625fa38c1f69fa3767a39ad577066d6ec15cfc7aa776a2bb0ea1b1a0cdb3c3271b1ceee21f07f2a5102d994f108af60116eb60b5d6adf1bb37432c9cedea03e7b396523e606021b0008c6d731880f96305863e5257312391b572893536be0017425f0a2a254a53fd90df0c990b44164d757879ba5348acea942fb754973f99726a92af0203010001300d06092a864886f70d01010b05000382020100a0e9419567a8c98ce7fa0d089c3b726047022845b7a6e229ad04c0fae6ebbdd2a00879eb02bde158a729bff69ce61645bfd4bf1a5936813f2a0a2ddc306dcf4216166e10df01b22254cbb231904c24bdf563acf1f1bcd77312e0c9166e519831b132e185e7059b317f1a7a6c4d57779e7fa63c56f6de3290177f83b6a16ba992e4319a9fcfcfba3e906f6d13322b37249486951d55d417fa3e9357e23264bec9d0ff66443d7f4d579d62133638cde85f4cf9b3972e7293a8357472039eccadf07cb0d85ffafc387d4269a3e4b4482baaf8b6f0080b7b0f408bd8d8d92f41cce54890a51cb5de1a237068d540557f0f68cb013b12dea0cff840b957e11fd6cd87f1cb858dd5950be70fa3f1530c02eacb60775e4150a7c8894043f2ca50d30385cc6a6a2766d20872de36cf9c59efce3399c3d01eceb4f6dc66f786bb02bfc5ec1bfce7a90d99e0f09ee2288ea38c218a21bd5a63a8caf648d4672dc8f444084f103b925ca6deec30022c4943df1a6c97878ac5ec0ddd676a4ba072f264b58488a145a8e3935424ba3c8f76e67d7931ef9fe77b06a61002de87553c8201692634183dd11b8dc9c89a3d7b69f0346b2273f6d2df4b2298c24d6b7cb34867d17944732bd016c9289580ca54b587a340523f952c2886d8c69739afc17ef295763d324c8f72fdcaa9c02b3ea83ba6486cd51559655c88f42dced5d9946095aad55375" timestamp="1794906326" url="https://thescriptingguy.github.io/localscribe/repo" version="20002">
+		<description>LocalScribe releases, built by GitHub Actions from https://github.com/TheScriptingGuy/localscribe and signed with the developer's release key.</description>
+	</repo>
+	<application id="ai.localscribe.localscribe">
+		<id>ai.localscribe.localscribe</id>
+		<added>2026-11-17</added>
+		<lastupdated>2026-11-17</lastupdated>
+		<name>LocalScribe</name>
+		<summary>Record, transcribe and summarise on your phone. Optional Plaud Note support.</summary>
+		<desc>&lt;p&gt;LocalScribe records conversations, meetings and lectures, transcribes them and turns them into notes, all on your phone. Nothing is uploaded unless you point it at an AI server of your own choice.&lt;/p&gt;
+
+&lt;p&gt;&lt;b&gt;Features&lt;/b&gt;&lt;/p&gt;
+&lt;ul&gt;
+&lt;li&gt;Record with the phone microphone (keeps running with the screen off) or import audio files.&lt;/li&gt;
+&lt;li&gt;Mark highlights, take photos and type notes while recording.&lt;/li&gt;
+&lt;li&gt;On-device transcription with whisper.cpp, in many languages, including mixed-language recordings.&lt;/li&gt;
+&lt;li&gt;Speaker recognition (who spoke when).&lt;/li&gt;
+&lt;li&gt;AI notes from 30 templates (meeting minutes, lecture notes, interviews, to-do lists and more), or write your own. Runs on the phone with llama.cpp, or on an OpenAI-compatible or Anthropic API you configure (Ollama, LM Studio, vLLM and others work too).&lt;/li&gt;
+&lt;li&gt;Ask questions about a recording.&lt;/li&gt;
+&lt;li&gt;Export transcripts and notes as TXT, Markdown, SRT, DOCX or PDF, and audio as WAV.&lt;/li&gt;
+&lt;li&gt;Light and dark theme.&lt;/li&gt;
+&lt;/ul&gt;
+
+&lt;p&gt;&lt;b&gt;Plaud Note recorder (optional)&lt;/b&gt;&lt;/p&gt;
+&lt;p&gt;If you own a Plaud Note recorder, LocalScribe can sync its recordings over Bluetooth and start, pause and stop recordings on it, including highlights made with the recorder's button. Setting this up signs in to Plaud's servers once with your own Plaud account to fetch your recorder's key; after that everything goes over Bluetooth. If you do not use a Plaud recorder, the app never contacts Plaud. LocalScribe is not affiliated with Plaud.&lt;/p&gt;
+
+&lt;p&gt;&lt;b&gt;Models&lt;/b&gt;&lt;/p&gt;
+&lt;p&gt;Speech and AI models are downloaded inside the app when you choose to use them (from Hugging Face). They are not included in the app.&lt;/p&gt;
+
+&lt;p&gt;In the F-Droid build, on-device speaker recognition is not included because its library is only available prebuilt; a self-hosted speaker recognition server can be used instead.&lt;/p&gt;
+</desc>
+		<license>MIT</license>
+		<categories>Multimedia,Writing</categories>
+		<category>Multimedia</category>
+		<web></web>
+		<source>https://github.com/TheScriptingGuy/localscribe</source>
+		<tracker>https://github.com/TheScriptingGuy/localscribe/issues</tracker>
+		<marketversion></marketversion>
+		<marketvercode>2002</marketvercode>
+		<antifeatures>NonFreeNet</antifeatures>
+		<package>
+			<version>0.2.0</version>
+			<versioncode>2002</versioncode>
+			<apkname>ai.localscribe.localscribe_2002.apk</apkname>
+			<hash type="sha256">fa9b912ea0cb7f27e845cc74c82bbda2a471fac91f1c395abf1aecf997c8fabf</hash>
+			<size>58589265</size>
+			<sdkver>24</sdkver>
+			<targetSdkVersion>36</targetSdkVersion>
+			<added>2026-11-17</added>
+			<sig>7f6b26a1244686a4bf9447d25b250cc8</sig>
+			<permissions>ACCESS_FINE_LOCATION,ACCESS_NETWORK_STATE,BLUETOOTH,BLUETOOTH_ADMIN,BLUETOOTH_CONNECT,BLUETOOTH_SCAN,FOREGROUND_SERVICE,FOREGROUND_SERVICE_DATA_SYNC,FOREGROUND_SERVICE_MICROPHONE,INTERNET,POST_NOTIFICATIONS,RECEIVE_BOOT_COMPLETED,RECORD_AUDIO,WAKE_LOCK,ai.localscribe.localscribe.DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION</permissions>
+			<uses-permission maxSdkVersion="30" name="android.permission.ACCESS_FINE_LOCATION"/>
+			<uses-permission maxSdkVersion="30" name="android.permission.BLUETOOTH"/>
+			<uses-permission maxSdkVersion="30" name="android.permission.BLUETOOTH_ADMIN"/>
+			<nativecode>arm64-v8a</nativecode>
+		</package>
+	</application>
+</fdroid>

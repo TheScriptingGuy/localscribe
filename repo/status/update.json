@@ -1,0 +1,42 @@
+{
+  "/etc/issue.net": "Ubuntu 26.04.1 LTS",
+  "antiFeatures": {
+    "NonFreeNet": {
+      "apps": [
+        "ai.localscribe.localscribe"
+      ]
+    }
+  },
+  "apksigner": "/usr/local/lib/android/sdk/build-tools/37.0.0/apksigner",
+  "archivePolicy0": [],
+  "commandLine": [
+    "/opt/hostedtoolcache/Python/3.12.16/x64/bin/fdroid update",
+    "--pretty",
+    "--use-date-from-apk"
+  ],
+  "disabled": [],
+  "endTimestamp": 1794906329276,
+  "failedBuilds": {},
+  "jarsigner": "/usr/bin/jarsigner",
+  "keytool": "/usr/bin/keytool",
+  "needsUpdate": [
+    "ai.localscribe.localscribe"
+  ],
+  "noPackages": [
+    "ai.localscribe.localscribe"
+  ],
+  "noUpdateCheck": [
+    "ai.localscribe.localscribe"
+  ],
+  "stages": {
+    "delete_disabled_builds": 1794906324517,
+    "index.make repo": 1794906326539,
+    "prepare_apps repo": 1794906325755,
+    "process_apks": 1794906324517,
+    "read_added_date_from_all_apks": 1794906325755,
+    "remove_apks": 1794906325754,
+    "scan_repo_files": 1794906325753
+  },
+  "startTimestamp": 1794906324000,
+  "subcommand": "update"
+}
