@@ -200,7 +200,6 @@ jobs:
           chmod 600 config.yml keystore.p12
           cp ../src/tool/fdroid/repo-metadata.yml metadata/$APP.yml
           cp -r ../src/fastlane/metadata/android/. metadata/$APP/
-          mkdir -p repo/icons && cp ../src/fastlane/metadata/android/en-US/images/icon.png repo/icons/icon.png
 
           # Earlier versions, then this one; keep the newest three.
           cp ../site/repo/*.apk repo/ 2>/dev/null || true
@@ -209,6 +208,10 @@ jobs:
           cp ../apk/app-arm64-v8a-release.apk "repo/${APP}_${VC}.apk"
           ls repo/*.apk | sort -V | head -n -3 | xargs -r rm -f
 
+          fdroid update --pretty --use-date-from-apk
+          # fdroid update replaces a missing repo icon with a placeholder;
+          # put ours in its place and index again so the checksums match.
+          cp ../src/fastlane/metadata/android/en-US/images/icon.png repo/icons/icon.png
           fdroid update --pretty --use-date-from-apk
           rm -f keystore.p12
 
