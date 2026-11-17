@@ -395,8 +395,12 @@ struct Span {
 // kChunk, cut at quiet points. With lang "auto" the first chunk's detected
 // language is kept for the rest. Progress covers `work` samples in total, of
 // which `done` were finished before this span.
+//
+// `live` (live captions: a few seconds at a time) shrinks whisper's encoder
+// window to the clip instead of the usual 30 s, which makes short clips
+// several times faster for a small loss in accuracy.
 bool transcribe_span(whisper_context *ctx, FILE *f, Span &s, int n_threads, Job *job,
-                     int64_t done, int64_t work) {
+                     int64_t done, int64_t work, bool live = false) {
     std::vector<int16_t> raw;
     std::vector<float> buf;
     int64_t pos = s.from;
@@ -427,6 +431,10 @@ bool transcribe_span(whisper_context *ctx, FILE *f, Span &s, int n_threads, Job 
         // Suppress non-speech caption tokens (e.g. "(dishes clinking)"),
         // a known whisper hallucination on short/sparse clips.
         wp.suppress_nst = true;
+        if (live && feed < (size_t)kRate * 30) {
+            // 50 encoder frames per second of audio, plus a little slack.
+            wp.audio_ctx = std::min(1500, (int)(feed * 50 / kRate) + 64);
+        }
 
         ProgressCtx pc{job, kDecodeShare + (int)((1000 - kDecodeShare) * (done + pos - s.from) / work),
                        (int)((1000 - kDecodeShare) * (int64_t)use / work)};
@@ -590,7 +598,7 @@ LS_API char *ls_transcribe(const char *model_path, const char *audio_path, const
         if (pieces && s.lang == "auto" && len < kShortTurn && known) {
             s.lang = speaker_lang[s.speaker];
         }
-        ok = transcribe_span(ctx, f, s, n_threads, job, done, work);
+        ok = transcribe_span(ctx, f, s, n_threads, job, done, work, raw);
         done += len;
         if (ok && pieces && len >= kShortTurn && s.speaker >= 0 && s.lang != "auto") {
             if (s.speaker >= (int)speaker_lang.size()) speaker_lang.resize(s.speaker + 1);

@@ -38,8 +38,9 @@ class LiveCaptioner extends ChangeNotifier {
       Settings settings, WhisperModelManager models) {
     if (!settings.liveCaptions || !settings.transcription.onDevice) return null;
     if (LocalScribeNative.unsupportedReason != null) return null;
-    final model = whisperModelByFile(settings.transcription.localModel);
-    if (model == null || !models.isInstalled(model)) return null;
+    final model = liveCaptionModel(
+        settings.transcription.localModel, models.isInstalled);
+    if (model == null) return null;
     final lang = settings.transcription.language;
     return LiveCaptioner(
       modelFile: models.fileOf(model),
@@ -124,8 +125,6 @@ class LiveCaptioner extends ChangeNotifier {
         .where((s) => (s['text'] as String? ?? '').trim().isNotEmpty)
         .toList();
     final seconds = snapshot.length / _bytesPerSecond;
-    debugPrint('captions: whisper ${seconds.toStringAsFixed(1)} s -> '
-        '${segments.map((s) => s['text']).join(' | ')}'); // TEMP diagnosis
 
     if (segments.isEmpty) {
       // Silence: keep only the last couple of seconds of context.
@@ -165,4 +164,22 @@ class LiveCaptioner extends ChangeNotifier {
     _stopped = true;
     _job?.cancel();
   }
+}
+
+/// The whisper model for live captions: they must keep up with speech, so a
+/// fast model wins over the (often larger) one chosen for transcription.
+/// Base if downloaded, else Tiny, else the transcription model. The final
+/// transcript still uses the chosen model.
+WhisperModel? liveCaptionModel(
+    String configured, bool Function(WhisperModel) isInstalled) {
+  for (final file in const [
+    'ggml-base-q5_1.bin',
+    'ggml-base.bin',
+    'ggml-tiny-q5_1.bin',
+  ]) {
+    final m = whisperModelByFile(file);
+    if (m != null && isInstalled(m)) return m;
+  }
+  final m = whisperModelByFile(configured);
+  return m != null && isInstalled(m) ? m : null;
 }

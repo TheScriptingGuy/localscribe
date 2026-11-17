@@ -1,7 +1,6 @@
 import 'dart:async';
 import 'dart:io';
 import 'dart:isolate';
-import 'dart:math' as math;
 import 'dart:typed_data';
 
 import 'package:flutter/foundation.dart';
@@ -60,37 +59,12 @@ class RecorderCaptionFeed {
     _busy = true;
     try {
       final pcm = await decodeOpusPackets(packets);
-      _debugChunk(start, packets, pcm); // TEMP: captions diagnosis
       if (!_stopped && pcm.isNotEmpty) onPcm(pcm);
     } catch (e) {
       debugPrint('captions: decode failed: $e');
     } finally {
       _busy = false;
     }
-  }
-
-  // TEMP: captions diagnosis. Logs each chunk's level and appends the PCM
-  // and the Ogg file to the app's external files dir for adb pull.
-  Future<void> _debugChunk(
-      int start, List<Uint8List> packets, Uint8List pcm) async {
-    var sum = 0.0;
-    final s16 = pcm.buffer.asInt16List(pcm.offsetInBytes, pcm.length ~/ 2);
-    for (final v in s16) {
-      sum += v * v;
-    }
-    final rms = s16.isEmpty ? 0 : math.sqrt(sum / s16.length);
-    debugPrint('captions: units $start+${packets.length} -> '
-        '${s16.length} samples, rms ${rms.toStringAsFixed(1)}');
-    try {
-      final dir = await getExternalStorageDirectory();
-      if (dir == null) return;
-      await File(p.join(dir.path, 'captions_debug.pcm'))
-          .writeAsBytes(pcm, mode: FileMode.append);
-      if (start < 2000) {
-        await File(p.join(dir.path, 'captions_chunk_$start.opus'))
-            .writeAsBytes(PlaudContainer.oggOpusOf(packets));
-      }
-    } catch (_) {}
   }
 
   /// What to decode next, from unit [next] (null: nothing taken yet).
