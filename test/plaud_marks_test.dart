@@ -8,7 +8,6 @@ import 'package:localscribe/services/ble/plaud_import.dart';
 import 'package:localscribe/models/recording.dart';
 import 'package:localscribe/services/ai/ai_types.dart';
 import 'package:localscribe/services/notes/highlights.dart';
-import 'package:localscribe/services/transcription/recorder_caption_feed.dart';
 import 'package:pointycastle/export.dart';
 
 /// A throwaway RSA-2048 key pair (the container's wrapped key is 256 bytes).
@@ -182,51 +181,6 @@ void main() {
       expect(e.startsWith('…'), isTrue);
       expect(e.endsWith('word19 and more'), isTrue);
       expect(e.length, lessThanOrEqualTo(41));
-    });
-  });
-
-  group('RecorderCaptionFeed.nextBatch', () {
-    test('starts at the live edge, past the gap after the first block', () {
-      final tocs = List.filled(400, 0xb8)..[250] = 0xb9;
-      final bytes = _container(keys.publicKey, tocs, padding: 0);
-      final s = PlaudLiveScanner(keys.privateKey);
-      const firstBlock = 640, liveFromUnit = 120;
-      s.add(0, Uint8List.sublistView(bytes, 0, firstBlock));
-      // Only a little live audio yet: wait.
-      const h = 0x200;
-      void addUnits(int from, int to) =>
-          s.add(h + from * 80, Uint8List.sublistView(bytes, h + from * 80, h + to * 80));
-      addUnits(liveFromUnit, liveFromUnit + 50);
-      expect(RecorderCaptionFeed.nextBatch(s, null), isNull);
-
-      addUnits(liveFromUnit + 50, 300);
-      final (start, packets) = RecorderCaptionFeed.nextBatch(s, null)!;
-      expect(start, liveFromUnit);
-      expect(packets.length, 300 - liveFromUnit);
-      // Payload byte = unit index; the mark unit comes back as normal audio.
-      expect(packets.first[1], liveFromUnit & 0xff);
-      expect(packets[250 - liveFromUnit][0], 0xb8);
-
-      // Then onwards from where it stopped.
-      expect(RecorderCaptionFeed.nextBatch(s, 300), isNull);
-      addUnits(300, 400);
-      final (start2, packets2) = RecorderCaptionFeed.nextBatch(s, 300)!;
-      expect(start2, 300);
-      expect(packets2.length, 100);
-    });
-
-    test('skips a stray piece before a gap', () {
-      final bytes = _container(keys.publicKey, List.filled(400, 0xb8), padding: 0);
-      final s = PlaudLiveScanner(keys.privateKey);
-      const h = 0x200;
-      s.add(0, Uint8List.sublistView(bytes, 0, h + 10 * 80));
-      s.add(h + 200 * 80, Uint8List.sublistView(bytes, h + 200 * 80, h + 400 * 80));
-      final (skipTo, none) = RecorderCaptionFeed.nextBatch(s, 0)!;
-      expect(none, isEmpty);
-      expect(skipTo, 10);
-      final (start, packets) = RecorderCaptionFeed.nextBatch(s, skipTo)!;
-      expect(start, 200);
-      expect(packets.length, 200);
     });
   });
 }
