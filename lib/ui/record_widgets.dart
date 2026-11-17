@@ -57,3 +57,68 @@ class RoundButton extends StatelessWidget {
     );
   }
 }
+
+/// Rolling live captions, collapsible.
+class CaptionsPanel extends StatelessWidget {
+  final List<String> lines;
+  final bool open;
+  final String? error;
+  final VoidCallback onToggle;
+  const CaptionsPanel(
+      {super.key,
+      required this.lines,
+      required this.open,
+      required this.error,
+      required this.onToggle});
+
+  @override
+  Widget build(BuildContext context) {
+    final c = context.colors;
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.fromLTRB(16, 8, 8, 12),
+      decoration: BoxDecoration(
+        color: c.fill,
+        borderRadius: BorderRadius.circular(14),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(Icons.closed_caption_outlined, size: 18, color: c.muted),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text('Live captions',
+                    style: TextStyle(color: c.muted, fontSize: 13)),
+              ),
+              IconButton(
+                visualDensity: VisualDensity.compact,
+                tooltip: open ? 'Hide captions' : 'Show captions',
+                onPressed: onToggle,
+                icon: Icon(open ? Icons.expand_less : Icons.expand_more),
+              ),
+            ],
+          ),
+          if (open)
+            Padding(
+              padding: const EdgeInsets.only(right: 8),
+              child: Text(
+                error != null
+                    ? 'Captions paused: $error'
+                    : lines.isEmpty
+                        ? 'Listening…'
+                        : lines.join(' '),
+                maxLines: 5,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                    fontSize: 16,
+                    height: 1.4,
+                    color: error != null ? c.danger : c.text),
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+}

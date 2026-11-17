@@ -171,6 +171,9 @@ class PlaudDeviceSession extends ChangeNotifier {
   /// Audio received over BLE so far.
   int get liveReceivedMs => _live?.durationMs ?? 0;
 
+  /// The live recording's bytes as they stream in (for live captions).
+  PlaudLiveScanner? get liveAudio => _live;
+
   /// Where in the recording "now" is, for a highlight, photo or note: the
   /// audio received so far, which is how the Plaud app times them (verified:
   /// a tap 31.6 s after start was labelled 00:00:30, the received position).

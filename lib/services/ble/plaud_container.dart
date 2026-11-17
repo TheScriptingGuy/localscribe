@@ -179,6 +179,48 @@ class PlaudLiveScanner {
   /// The gap-free file bytes received so far.
   Uint8List get bytes => Uint8List.sublistView(_buf, 0, contiguousBytes);
 
+  /// Units of audio the furthest received bytes reach (exclusive index).
+  int get unitsEnd {
+    final n = (_maxEnd - PlaudContainer.headerSize) ~/ PlaudContainer.unitSize;
+    return n > 0 ? n : 0;
+  }
+
+  /// The first unit at or after [k] that has been received in full, or
+  /// [unitsEnd] if there is none yet. Used to step over the gap the live
+  /// stream leaves after the header.
+  int nextReceivedUnit(int k) {
+    const h = PlaudContainer.headerSize, u = PlaudContainer.unitSize;
+    for (final r in _ranges) {
+      final first = r[0] <= h ? 0 : (r[0] - h + u - 1) ~/ u; // round up
+      final end = (r[1] - h) ~/ u; // exclusive
+      final start = k > first ? k : first;
+      if (start < end) return start;
+    }
+    return unitsEnd;
+  }
+
+  /// Decrypted Opus packets for the received units from [from] on, up to the
+  /// first one that is missing or is not audio (at most [max]). Recorder
+  /// highlight units are returned with the normal TOC, ready to decode.
+  List<Uint8List> packetsFrom(int from, {int max = 1 << 30}) {
+    final ks = _ks;
+    if (ks == null) return const [];
+    const h = PlaudContainer.headerSize, u = PlaudContainer.unitSize;
+    final out = <Uint8List>[];
+    for (var k = from; out.length < max; k++) {
+      final off = h + k * u;
+      if (!_covered(off, off + u)) break;
+      final pkt = Uint8List(u);
+      for (var i = 0; i < u; i++) {
+        pkt[i] = _buf[off + i] ^ ks[i];
+      }
+      if (!PlaudContainer.isAudioToc(pkt[0])) break;
+      pkt[0] = PlaudContainer._toc;
+      out.add(pkt);
+    }
+    return out;
+  }
+
   void add(int offset, Uint8List data) {
     if (data.isEmpty) return;
     final end = offset + data.length;

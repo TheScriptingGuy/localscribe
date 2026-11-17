@@ -15,6 +15,10 @@ import '../services/ble/plaud_crypto.dart';
 import '../services/ble/plaud_device.dart';
 import '../services/ble/plaud_import.dart';
 import '../services/library/recording_store.dart';
+import '../services/models/whisper_models.dart';
+import '../services/transcription/live_captioner.dart';
+import '../services/transcription/recorder_caption_feed.dart';
+import '../settings/settings.dart';
 import 'format.dart';
 import 'record_widgets.dart';
 import 'theme.dart';
@@ -44,6 +48,11 @@ class _DeviceRecordScreenState extends State<DeviceRecordScreen> {
   final _session = PlaudDeviceSession();
   StreamSubscription<int>? _markSub;
   Timer? _ticker;
+
+  /// On-device live captions from the recorder's audio stream.
+  LiveCaptioner? _captions;
+  RecorderCaptionFeed? _captionFeed;
+  var _captionsOpen = true;
 
   bool _starting = false;
   bool _recording = false;
@@ -83,6 +92,8 @@ class _DeviceRecordScreenState extends State<DeviceRecordScreen> {
     _session.removeListener(_onSession);
     _ticker?.cancel();
     _markSub?.cancel();
+    _stopCaptions();
+    _captions?.dispose();
     _session.dispose();
     _noteCtrl.dispose();
     _noteFocus.dispose();
@@ -132,10 +143,33 @@ class _DeviceRecordScreenState extends State<DeviceRecordScreen> {
     }
     _ticker = Timer.periodic(
         const Duration(milliseconds: 250), (_) => setState(() {}));
+    _startCaptions();
     setState(() {
       _starting = false;
       _recording = true;
     });
+  }
+
+  /// Live captions: the recorder's audio is decoded and run through whisper
+  /// on the phone as it streams in (off when live captions are off, on a
+  /// remote transcriber, or without a whisper model).
+  void _startCaptions() {
+    final captions = LiveCaptioner.tryCreate(
+        context.read<Settings>(), context.read<WhisperModelManager>());
+    if (captions == null) return;
+    captions.addListener(() {
+      if (mounted) setState(() {});
+    });
+    _captions = captions;
+    _captionFeed = RecorderCaptionFeed(
+      audio: () => _session.liveAudio,
+      onPcm: captions.feed,
+    )..start();
+  }
+
+  void _stopCaptions() {
+    _captionFeed?.stop();
+    _captions?.stop();
   }
 
   void _add(_Entry e) {
@@ -235,6 +269,7 @@ class _DeviceRecordScreenState extends State<DeviceRecordScreen> {
     final messenger = ScaffoldMessenger.of(context);
     setState(() => _stopping = true);
     _ticker?.cancel();
+    _stopCaptions();
     final result = await _session.stopRecording();
     await RecordingService.stopWork(_workOwner).catchError((_) {});
     if (!mounted) return;
@@ -450,6 +485,16 @@ class _DeviceRecordScreenState extends State<DeviceRecordScreen> {
         Expanded(
           child: _entries.isEmpty ? _hints(context) : _timeline(context),
         ),
+        if (_captions != null && !_stopping)
+          Padding(
+            padding: const EdgeInsets.fromLTRB(24, 8, 24, 0),
+            child: CaptionsPanel(
+              lines: _captions!.recentLines(),
+              open: _captionsOpen,
+              error: _captions!.error,
+              onToggle: () => setState(() => _captionsOpen = !_captionsOpen),
+            ),
+          ),
         Padding(
           padding: const EdgeInsets.fromLTRB(24, 8, 24, 24),
           child: Row(
