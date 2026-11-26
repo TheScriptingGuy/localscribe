@@ -5,6 +5,7 @@ import 'dart:typed_data';
 import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_reactive_ble/flutter_reactive_ble.dart';
+import 'package:just_audio/just_audio.dart';
 import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
 import 'package:permission_handler/permission_handler.dart';
@@ -167,12 +168,29 @@ class _PlaudDevicesScreenState extends State<PlaudDevicesScreen> {
         final resp = await dio.get<List<int>>(url,
             options: Options(responseType: ResponseType.bytes));
         final bytes = Uint8List.fromList(resp.data!);
-        final f = File(p.join(tmp.path, 'plaud_${r.id}.mp3'));
+        final f = File(p.join(tmp.path, 'plaud_${r.id}${_audioExt(bytes)}'));
         await f.writeAsBytes(bytes, flush: true);
+        // The file list carries the duration (ms); fall back to probing the
+        // file if the server didn't report one.
+        var durationMs = r.durationMs;
+        if (durationMs <= 0) {
+          final probe = AudioPlayer();
+          try {
+            durationMs = (await probe.setFilePath(f.path))?.inMilliseconds ?? 0;
+          } catch (_) {
+            // Unknown to the player; still transcribable.
+          } finally {
+            await probe.dispose();
+          }
+        }
         await store.add(
           f,
           title: r.filename.isEmpty ? r.id : r.filename,
           source: RecordingSource.plaud,
+          durationMs: durationMs,
+          createdAt: r.startTimeMs > 0
+              ? DateTime.fromMillisecondsSinceEpoch(r.startTimeMs)
+              : null,
           move: true,
         );
         saved++;
@@ -188,6 +206,23 @@ class _PlaudDevicesScreenState extends State<PlaudDevicesScreen> {
         _error = '$e';
       });
     }
+  }
+
+  /// Pick a file extension from the audio's magic bytes. `is_opus=1` returns
+  /// Ogg Opus, not MP3, and a wrong extension trips up decoders.
+  static String _audioExt(Uint8List b) {
+    bool at(int o, List<int> sig) {
+      if (b.length < o + sig.length) return false;
+      for (var i = 0; i < sig.length; i++) {
+        if (b[o + i] != sig[i]) return false;
+      }
+      return true;
+    }
+
+    if (at(0, const [0x4F, 0x67, 0x67, 0x53])) return '.ogg'; // OggS
+    if (at(0, const [0x52, 0x49, 0x46, 0x46])) return '.wav'; // RIFF
+    if (at(4, const [0x66, 0x74, 0x79, 0x70])) return '.m4a'; // ftyp
+    return '.mp3';
   }
 
   /// Pull a device serial out of the manufacturer data. It's 9 raw binary
