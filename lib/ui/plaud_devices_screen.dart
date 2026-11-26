@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:developer' as developer;
 import 'dart:io';
 import 'dart:typed_data';
 
@@ -12,7 +13,10 @@ import 'package:permission_handler/permission_handler.dart';
 import 'package:provider/provider.dart';
 
 import '../models/recording.dart';
+import '../services/ble/plaud_container.dart';
 import '../services/ble/plaud_credentials.dart';
+import '../services/ble/plaud_crypto.dart';
+import '../services/ble/plaud_import.dart';
 import '../services/library/recording_store.dart';
 import '../services/plaud/plaud_cloud_api.dart';
 import 'plaud_import_screen.dart';
@@ -168,11 +172,45 @@ class _PlaudDevicesScreenState extends State<PlaudDevicesScreen> {
         final resp = await dio.get<List<int>>(url,
             options: Options(responseType: ResponseType.bytes));
         final bytes = Uint8List.fromList(resp.data!);
-        final f = File(p.join(tmp.path, 'plaud_${r.id}${_audioExt(bytes)}'));
-        await f.writeAsBytes(bytes, flush: true);
+        final head = bytes
+            .take(16)
+            .map((b) => b.toRadixString(16).padLeft(2, '0'))
+            .join(' ');
+        developer.log(
+            'cloud file ${r.id}: ${bytes.length} B, '
+            'type=${resp.headers.value('content-type')}, head=$head',
+            name: 'PlaudSync');
+
+        var durationMs = r.durationMs;
+        var markers = const <RecordingMarker>[];
+        File f;
+        final container = PlaudContainer(bytes);
+        if (container.looksValid) {
+          // Private Cloud Sync stores the recorder's end-to-end encrypted
+          // PLAUD.AI container as-is; unmask it with the account's RSA key,
+          // exactly like a BLE download.
+          final pem = cred.rsaPrivateKeyPem;
+          if (pem == null || pem.isEmpty) {
+            throw StateError(
+                'Recording ${r.id} is end-to-end encrypted, but no Plaud key '
+                'is loaded. Sign in again to fetch it.');
+          }
+          final audio = container.decode(PlaudCrypto.privateKeyFromPem(pem));
+          if (audio.packets.isEmpty) {
+            throw StateError(
+                'Could not decrypt recording ${r.id} with the loaded Plaud key.');
+          }
+          durationMs = audio.durationMs;
+          markers = recorderMarkers(audio.markMs);
+          f = File(p.join(tmp.path, 'plaud_${r.id}.opus'));
+          await f.writeAsBytes(PlaudContainer.oggOpusOf(audio.packets),
+              flush: true);
+        } else {
+          f = File(p.join(tmp.path, 'plaud_${r.id}${_audioExt(bytes)}'));
+          await f.writeAsBytes(bytes, flush: true);
+        }
         // The file list carries the duration (ms); fall back to probing the
         // file if the server didn't report one.
-        var durationMs = r.durationMs;
         if (durationMs <= 0) {
           final probe = AudioPlayer();
           try {
@@ -188,6 +226,7 @@ class _PlaudDevicesScreenState extends State<PlaudDevicesScreen> {
           title: r.filename.isEmpty ? r.id : r.filename,
           source: RecordingSource.plaud,
           durationMs: durationMs,
+          markers: markers,
           createdAt: r.startTimeMs > 0
               ? DateTime.fromMillisecondsSinceEpoch(r.startTimeMs)
               : null,
