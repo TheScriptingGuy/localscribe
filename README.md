@@ -25,6 +25,20 @@ LocalScribe's own.
 > Use it only with devices and accounts you own, and at your own risk; it is
 > provided "as is" without warranty of any kind (see `LICENSE`).
 
+## Ways to use it
+
+LocalScribe works at three levels; pick the one that suits you, and change
+your mind at any time.
+
+| | What you use | Network |
+|---|---|---|
+| **Fully local** | Phone-mic recording or imported audio, `whisper.cpp` transcription, `sherpa-onnx` speaker recognition, `llama.cpp` notes | None. The app needs no account, and models are the only thing it downloads (once, from Hugging Face, when you choose one). |
+| **Local + your own AI server** | The same, but transcription, speakers or notes run on a server you host or an API you configure | Only to the exact URL you enter |
+| **With a Plaud recorder** | Everything above, plus recordings captured and synced from a Plaud Note over Bluetooth | Plaud's servers are contacted once to set up (see below); after that, Bluetooth only |
+
+Nothing in the first two rows touches Plaud, and a Plaud recorder is never
+required.
+
 ## What it does
 
 - **Record** from the phone mic, **import** existing audio files, and
@@ -137,13 +151,43 @@ produce; LocalScribe **synthesizes the LLM prompt locally** from it (see
 
 ## Plaud recorder (optional)
 
-To talk to a Plaud Note recorder over Bluetooth, LocalScribe needs the
-recorder's key, which lives in your Plaud account. Setting up a recorder signs
-in to Plaud's servers **once, with your own account**, to fetch that key and
-the list of your recorders; it can also list and download recordings stored in
-your Plaud cloud if you ask it to. Nothing is uploaded. After that, syncing
-and recording on the recorder happen over Bluetooth only. If you never set up
-a recorder, the app never contacts Plaud.
+### Why is there any cloud interaction at all?
+
+A Plaud recorder only talks to a phone that holds its **key**, and that key
+is not on the recorder or in this app: it lives in the owner's Plaud account.
+The recorder checks the key on every Bluetooth connection, so without it
+nothing else works: not syncing, and not starting a recording. LocalScribe
+therefore signs in to Plaud's servers **once, with your own account**, and
+fetches only what it needs to be your recorder's second phone: the key and
+the list of your recorders. That is the only reason the Plaud cloud is
+involved, and it happens only when you choose *Plaud devices → Sign in*.
+
+What happens afterwards depends on how you want to work:
+
+- **Bluetooth only (default for syncing and recording).** Recordings are
+  pulled from the recorder, and recording is started, paused and stopped,
+  over Bluetooth. Nothing more goes to Plaud, and nothing is uploaded.
+- **Plaud cloud download (optional).** If your recordings are already in your
+  Plaud cloud (for example because the Plaud app synced them), LocalScribe
+  can list and download them with the same sign-in, which is faster than
+  Bluetooth for long recordings. It only downloads, and only when you start
+  it.
+- **Never set up a recorder.** The app never contacts Plaud.
+
+Everything after the download (transcription, speaker recognition, notes)
+runs locally or on the server you configured, exactly as for any other
+recording; Plaud's own AI is not used.
+
+## Related projects
+
+Other open-source Android apps that run speech recognition on the phone with
+`whisper.cpp`:
+
+- [Notes Tech](https://f-droid.org/packages/com.filestech.notes_tech/): encrypted
+  Markdown notes with no Internet permission and on-device voice dictation.
+  LocalScribe covers different ground (long recordings, speaker recognition,
+  AI notes from templates, Plaud recorder support), but if you only want
+  private notes with local dictation, it is worth a look.
 
 ## Install
 

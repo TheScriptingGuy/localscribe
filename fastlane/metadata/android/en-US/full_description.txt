@@ -12,8 +12,11 @@
 <li>Light and dark theme.</li>
 </ul>
 
+<p><b>Local by default</b></p>
+<p>Recording, transcription, speaker recognition and AI notes can all run on the phone, with no account and no network apart from downloading the models you choose. You can instead point any of them at a server you host.</p>
+
 <p><b>Plaud Note recorder (optional)</b></p>
-<p>If you own a Plaud Note recorder, LocalScribe can sync its recordings over Bluetooth and start, pause and stop recordings on it, including highlights made with the recorder's button. Setting this up signs in to Plaud's servers once with your own Plaud account to fetch your recorder's key; after that everything goes over Bluetooth. If you do not use a Plaud recorder, the app never contacts Plaud. LocalScribe is not affiliated with Plaud.</p>
+<p>If you own a Plaud Note recorder, LocalScribe can sync its recordings over Bluetooth and start, pause and stop recordings on it, including highlights made with the recorder's button. The recorder only talks to a phone that holds its key, and that key is kept in your Plaud account, so setting this up signs in to Plaud's servers once with your own account to fetch it. After that everything goes over Bluetooth; downloading recordings from your Plaud cloud is optional. If you do not use a Plaud recorder, the app never contacts Plaud. LocalScribe is not affiliated with Plaud.</p>
 
 <p><b>Models</b></p>
 <p>Speech and AI models are downloaded inside the app when you choose to use them (from Hugging Face). They are not included in the app.</p>
