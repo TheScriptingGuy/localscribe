@@ -205,6 +205,27 @@ class _PlaudDevicesScreenState extends State<PlaudDevicesScreen> {
           f = File(p.join(tmp.path, 'plaud_${r.id}.opus'));
           await f.writeAsBytes(PlaudContainer.oggOpusOf(audio.packets),
               flush: true);
+        } else if (_isRawPlaudOpus(bytes)) {
+          // The cloud usually serves the recorder's audio already decrypted
+          // but still as bare 80-byte Opus units (no container). Wrap them in
+          // Ogg so the player and transcriber can read them.
+          final packets = <Uint8List>[];
+          final marks = <int>[];
+          for (var off = 0;
+              off + PlaudContainer.unitSize <= bytes.length;
+              off += PlaudContainer.unitSize) {
+            final pkt = Uint8List.fromList(
+                bytes.sublist(off, off + PlaudContainer.unitSize));
+            if (pkt[0] == PlaudContainer.markToc) {
+              marks.add(packets.length * PlaudContainer.unitMs);
+              pkt[0] = _plaudToc;
+            }
+            packets.add(pkt);
+          }
+          durationMs = packets.length * PlaudContainer.unitMs;
+          markers = recorderMarkers(marks);
+          f = File(p.join(tmp.path, 'plaud_${r.id}.opus'));
+          await f.writeAsBytes(PlaudContainer.oggOpusOf(packets), flush: true);
         } else {
           f = File(p.join(tmp.path, 'plaud_${r.id}${_audioExt(bytes)}'));
           await f.writeAsBytes(bytes, flush: true);
@@ -245,6 +266,22 @@ class _PlaudDevicesScreenState extends State<PlaudDevicesScreen> {
         _error = '$e';
       });
     }
+  }
+
+  /// Opus TOC of every Plaud recorder packet (CELT WB, mono, 20 ms).
+  static const int _plaudToc = 0xb8;
+
+  /// Bare Plaud Opus stream: a whole number of 80-byte units, each starting
+  /// with the recorder's TOC (or the highlight-mark TOC). Checks every unit,
+  /// so a random file can't pass by chance.
+  static bool _isRawPlaudOpus(Uint8List b) {
+    const n = PlaudContainer.unitSize;
+    if (b.isEmpty || b.length % n != 0) return false;
+    for (var off = 0; off < b.length; off += n) {
+      final toc = b[off];
+      if (toc != _plaudToc && toc != PlaudContainer.markToc) return false;
+    }
+    return true;
   }
 
   /// Pick a file extension from the audio's magic bytes. `is_opus=1` returns
