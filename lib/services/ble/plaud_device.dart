@@ -139,19 +139,20 @@ class PlaudDeviceSession extends ChangeNotifier {
       PlaudCommands cmds, PlaudCredentials cred) async {
     final dev = activeDevice!;
     _set(PlaudStatus.syncing, 'Starting fast transfer…');
-    // Without a password in the request the recorder picks one and returns
-    // it (the Plaud app only sends its own when the recorder reports
-    // `dynamic_password_support`; this recorder ignored one we sent).
+    // The recorder's reply is just a status byte; the access point's
+    // password is the last 8 characters of its serial (verified with Frida on
+    // the Plaud app: serial ...7178688B -> SSID PLAUD688B, password 7178688B).
     final reply = await _request(cmds, 0x0a, const [0x00]);
     _log('open wifi reply ${_hex(reply)}');
     if (reply.isEmpty || reply[0] != 0) {
       throw StateError('recorder refused WiFi (status '
           '${reply.isEmpty ? '?' : reply[0]})');
     }
-    if (reply.length < 9) {
-      throw StateError('recorder sent no WiFi password');
-    }
-    final apPass = String.fromCharCodes(reply.sublist(1, 9));
+    final sn = dev.serial;
+    if (sn.length < 8) throw StateError('serial too short for WiFi password');
+    final apPass = reply.length >= 9
+        ? String.fromCharCodes(reply.sublist(1, 9))
+        : sn.substring(sn.length - 8);
     final s = dev.serial;
     final ssid = 'PLAUD${s.length >= 4 ? s.substring(s.length - 4) : s}';
     final link = PlaudWifiLink(
