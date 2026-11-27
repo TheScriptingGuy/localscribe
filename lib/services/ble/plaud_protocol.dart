@@ -121,6 +121,10 @@ class PlaudCommands {
 
   int get nextSeq => _seq;
 
+  /// Claims the next sequence number for a message sent outside BLE (the
+  /// WiFi link shares the BLE session's counter).
+  int takeSeq() => _seq++;
+
   Uint8List _control(int op, List<int> content, {int status = 0}) {
     final b = BytesBuilder()
       ..add(_le32(_seq++))

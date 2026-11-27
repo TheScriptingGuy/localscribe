@@ -1,14 +1,17 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:math';
 import 'dart:typed_data';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter_reactive_ble/flutter_reactive_ble.dart';
+import 'package:wifi_iot/wifi_iot.dart';
 
 import 'plaud_container.dart';
 import 'plaud_credentials.dart';
 import 'plaud_crypto.dart';
 import 'plaud_protocol.dart';
+import 'plaud_wifi.dart';
 
 enum PlaudStatus {
   idle,
@@ -79,18 +82,123 @@ class PlaudDeviceSession extends ChangeNotifier {
   /// Full flow: scan → connect → handshake → sync. Credentials come from
   /// [cred]; [dev] is the target recorder (its public key is presented).
   /// Files whose id is in [skip] (already in the library) are not downloaded.
+  ///
+  /// With [fast], the recordings come over the recorder's own WiFi access
+  /// point ("fast transfer") instead of BLE; the list and setup stay on BLE.
+  /// If WiFi can't be brought up the sync carries on over BLE.
   Future<void> sync(PlaudCredentials cred, PlaudDeviceCred dev,
-      {Set<int> skip = const {}}) async {
+      {Set<int> skip = const {}, bool fast = false}) async {
     downloads.clear();
+    PlaudWifiLink? wifi;
+    PlaudCommands? cmds;
     try {
-      final cmds = await _open(cred, dev);
-      await _runSync(cmds, skip);
+      cmds = await _open(cred, dev);
+      final todo = await _listToSync(cmds, skip);
+      if (fast && todo.isNotEmpty) {
+        try {
+          wifi = await _openWifi(cmds, cred);
+        } catch (e) {
+          _log('fast transfer unavailable ($e); using Bluetooth');
+          await _closeWifi(cmds, null);
+        }
+      }
+      for (final e in todo) {
+        Uint8List? bytes;
+        final link = wifi;
+        if (link != null && link.connected) {
+          _set(PlaudStatus.syncing,
+              'Downloading ${e.fileId.toRadixString(16)} over WiFi…');
+          progress = 0;
+          bytes = await link.download(e.fileId, e.size, onProgress: (n) {
+            final p = n / e.size;
+            if (p - progress >= 0.01 || n >= e.size) {
+              progress = p;
+              notifyListeners();
+            }
+          });
+        }
+        bytes ??= await _download(cmds, e.fileId, e.size);
+        if (bytes != null) downloads.add(PlaudDownload(e.fileId, bytes));
+      }
       _set(PlaudStatus.done, 'Synced ${downloads.length} recording(s)');
     } catch (e) {
       _log('ERROR $e');
       _set(PlaudStatus.error, '$e');
     } finally {
+      if (wifi != null) await _closeWifi(cmds, wifi);
       await _cleanup();
+    }
+  }
+
+  /// BLE op 0x0a (OpenWiFi, `qi.d0`): `[isOta:1][password:8 ascii]` ->
+  /// `[status:1][password:8]`. The recorder then runs an access point named
+  /// `PLAUD` + the last 4 of its serial; once the phone has joined it, the
+  /// recorder connects to the phone's WebSocket server on port 8081.
+  Future<PlaudWifiLink> _openWifi(
+      PlaudCommands cmds, PlaudCredentials cred) async {
+    final dev = activeDevice!;
+    _set(PlaudStatus.syncing, 'Starting fast transfer…');
+    const chars = 'abcdefghijkmnpqrstuvwxyz23456789';
+    final rnd = Random.secure();
+    final pass =
+        List.generate(8, (_) => chars[rnd.nextInt(chars.length)]).join();
+    final reply = await _request(cmds, 0x0a, [0x00, ...pass.codeUnits]);
+    _log('open wifi reply ${_hex(reply)}');
+    if (reply.isEmpty || reply[0] != 0) {
+      throw StateError('recorder refused WiFi (status '
+          '${reply.isEmpty ? '?' : reply[0]})');
+    }
+    final apPass = reply.length >= 9
+        ? String.fromCharCodes(reply.sublist(1, 9))
+        : pass;
+    final s = dev.serial;
+    final ssid = 'PLAUD${s.length >= 4 ? s.substring(s.length - 4) : s}';
+    final link = PlaudWifiLink(
+      keys: _keys!,
+      nextSeq: cmds.takeSeq,
+      serial: s,
+      token: cred.userId ?? '',
+      log: _log,
+    );
+    try {
+      await link.listen();
+      _set(PlaudStatus.syncing, 'Joining $ssid…');
+      _log('joining $ssid');
+      final joined = await WiFiForIoTPlugin.connect(ssid,
+          password: apPass,
+          security: NetworkSecurity.WPA,
+          joinOnce: true,
+          withInternet: false,
+          timeoutInSeconds: 40);
+      if (!joined) throw StateError('could not join $ssid');
+      _log('joined $ssid');
+      _set(PlaudStatus.syncing, 'Waiting for the recorder on WiFi…');
+      await link.handshake();
+      return link;
+    } catch (e) {
+      await link.close();
+      rethrow;
+    }
+  }
+
+  /// Leaves fast-transfer mode: closes the link, tells the recorder to turn
+  /// its access point off (BLE op 0x0d, `qi.g`) and drops the phone's
+  /// connection to it.
+  Future<void> _closeWifi(PlaudCommands? cmds, PlaudWifiLink? link) async {
+    await link?.close();
+    if (cmds != null && _connected) {
+      try {
+        await _sendCmd(cmds, 0x0d, const []);
+        await _settle();
+      } catch (e) {
+        _log('close wifi: $e');
+      }
+    }
+    try {
+      await WiFiForIoTPlugin.disconnect();
+      await WiFiForIoTPlugin.forceWifiUsage(false);
+    } catch (e) {
+      _log('wifi disconnect: $e');
     }
   }
 
@@ -103,11 +211,12 @@ class PlaudDeviceSession extends ChangeNotifier {
     _keyChunks.clear();
     _connected = false;
     final priv = PlaudCrypto.privateKeyFromPem(cred.rsaPrivateKeyPem!);
-    final id = await _scan(dev.serial);
+    final (id, target) = await _scan(dev, cred.devices);
     _deviceId = id;
+    activeDevice = target;
     await _connect(id);
     await _subscribe(id);
-    await _handshake(dev.publicKey, priv);
+    await _handshake(target.publicKey, priv);
 
     _set(PlaudStatus.handshaking, 'Setting up…');
     final cmds = PlaudCommands(_keys!);
@@ -416,61 +525,75 @@ class PlaudDeviceSession extends ChangeNotifier {
   /// that's "can only sync with one of my two recorders". Require the
   /// advertised serial (from manufacturer data) to match so we always
   /// connect to the one the selected credential is actually for.
-  Future<String> _scan(String? targetSerial) async {
+  /// The enrolled recorder this session actually connected to. Usually the
+  /// one asked for, but if that one is not around and another recorder on the
+  /// account is, it is that one (its own public key must be presented, or the
+  /// recorder drops the connection during the handshake).
+  PlaudDeviceCred? activeDevice;
+
+  /// Scans for [dev]. Returns the BLE id and the credentials to use: [dev] if
+  /// it is advertising, else another enrolled recorder from [known] that is,
+  /// else (adverts without a readable serial) the first PLAUD advert with
+  /// [dev]'s credentials.
+  Future<(String, PlaudDeviceCred)> _scan(
+      PlaudDeviceCred dev, List<PlaudDeviceCred> known) async {
     _set(PlaudStatus.scanning, 'Scanning for ${PlaudProtocol.deviceName}…');
-    final completer = Completer<String>();
-    // Falls back to the first PLAUD-named advert if no serial match shows up
-    // in time — the serial extraction is unverified on real hardware (every
-    // advert has logged serial=? so far), and failing sync entirely whenever
-    // it misses would be worse than the "wrong of two recorders" bug it's
-    // meant to fix. Logged loudly so a wrong-device handshake rejection is
-    // diagnosable rather than silently retried forever.
-    String? fallbackId;
-    String? fallbackName;
+    final completer = Completer<(String, PlaudDeviceCred)>();
+    (String, PlaudDeviceCred)? otherEnrolled;
+    String? unknownId;
+    final foreign = <String>{};
     // No service filter: the recorder does not advertise its GATT service UUID
     // (0x1910) — that only appears in the GATT table after connecting. We match
-    // purely by advertised device name instead. Log every named advert seen so
-    // a miss is diagnosable on-screen.
+    // by advertised name, then by the serial in the manufacturer data.
     _scanSub = _ble.scanForDevices(
       withServices: const [],
       scanMode: ScanMode.lowLatency,
     ).listen((d) {
-      if (d.name.isNotEmpty) {
-        final serial = _serialIn(d.manufacturerData);
-        _log('advert ${d.name} rssi=${d.rssi} serial=${serial ?? '?'} '
-            'mfgData=${_hex(d.manufacturerData)}');
-      }
       if (completer.isCompleted) return;
       if (d.name != PlaudProtocol.deviceName && !d.name.startsWith('PLAUD')) {
         return;
       }
-      if (targetSerial != null && targetSerial.isNotEmpty) {
-        final serial = _serialIn(d.manufacturerData);
-        if (serial != targetSerial) {
-          fallbackId ??= d.id;
-          fallbackName ??= d.name;
-          return;
-        }
+      final serial = _serialIn(d.manufacturerData);
+      if (dev.serial.isEmpty || serial == dev.serial) {
+        _log('found ${d.name} ${d.id} serial=$serial rssi=${d.rssi}');
+        completer.complete((d.id, dev));
+        return;
       }
-      _log('found ${d.name} ${d.id} rssi=${d.rssi}');
-      completer.complete(d.id);
+      if (serial == null) {
+        unknownId ??= d.id;
+        return;
+      }
+      final match = known.where((k) => k.serial == serial);
+      if (match.isNotEmpty) {
+        otherEnrolled ??= (d.id, match.first);
+      } else if (foreign.add(serial)) {
+        _log('ignoring ${d.name} $serial (not on this account)');
+      }
     }, onError: (e) {
       if (!completer.isCompleted) completer.completeError(e);
     });
-    final id = await completer.future.timeout(const Duration(seconds: 8),
+    final r = await completer.future.timeout(const Duration(seconds: 8),
         onTimeout: () {
-      if (fallbackId != null) {
-        _log('no serial match for $targetSerial within 8s; '
-            'falling back to $fallbackName $fallbackId');
-        return fallbackId!;
+      final other = otherEnrolled;
+      if (other != null) {
+        _log('${dev.serial} not nearby; using ${other.$2.name} '
+            '${other.$2.serial} instead');
+        return other;
       }
-      throw TimeoutException(
-          'recorder not found (is it on and not in the Plaud app?)');
+      if (unknownId != null) {
+        _log('no serial in adverts; trying ${unknownId!} as ${dev.serial}');
+        return (unknownId!, dev);
+      }
+      throw TimeoutException(foreign.isEmpty
+          ? 'recorder not found (is it on and not in the Plaud app?)'
+          : 'recorder ${dev.serial} not found; nearby recorder '
+              '${foreign.join(', ')} is not on this account');
     });
     await _scanSub?.cancel();
     _scanSub = null;
-    return id;
+    return r;
   }
+
 
   Future<void> _connect(String id) async {
     _set(PlaudStatus.connecting, 'Connecting…');
@@ -594,7 +717,10 @@ class PlaudDeviceSession extends ChangeNotifier {
     throw TimeoutException('no wrapped-key response (key not enrolled?)');
   }
 
-  Future<void> _runSync(PlaudCommands cmds, Set<int> skip) async {
+  /// The recorder's finished recordings (op 0x1a) that are not in [skip],
+  /// newest first.
+  Future<List<PlaudFileEntry>> _listToSync(
+      PlaudCommands cmds, Set<int> skip) async {
     _set(PlaudStatus.syncing, 'Requesting recordings…');
 
     // op 0x1a = list pending files, verified against a live capture of the
@@ -625,6 +751,7 @@ class PlaudDeviceSession extends ChangeNotifier {
 
     // Newest first (file ids are unix timestamps, so descending = latest).
     final sorted = entries.toList()..sort((a, b) => b.fileId.compareTo(a.fileId));
+    final todo = <PlaudFileEntry>[];
     for (final e in sorted) {
       // A reported size of 0 means the recorder is still actively writing
       // this file (it's the in-progress recording, not a finished one) — its
@@ -642,9 +769,9 @@ class PlaudDeviceSession extends ChangeNotifier {
         _log('skipping ${e.fileId.toRadixString(16)}: already in the library');
         continue;
       }
-      final bytes = await _download(cmds, e.fileId, e.size);
-      if (bytes != null) downloads.add(PlaudDownload(e.fileId, bytes));
+      todo.add(e);
     }
+    return todo;
   }
 
   Future<Uint8List?> _download(PlaudCommands cmds, int fileId, int knownSize) async {

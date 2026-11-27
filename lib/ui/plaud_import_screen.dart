@@ -24,6 +24,7 @@ class PlaudImportScreen extends StatefulWidget {
 class _PlaudImportScreenState extends State<PlaudImportScreen> {
   final _session = PlaudDeviceSession();
   bool _running = false;
+  bool _fast = true;
   int _saved = 0;
 
   @override
@@ -37,6 +38,7 @@ class _PlaudImportScreenState extends State<PlaudImportScreen> {
       Permission.bluetoothScan,
       Permission.bluetoothConnect,
       Permission.locationWhenInUse,
+      if (_fast) Permission.nearbyWifiDevices,
     ].request();
     // On Android 12+ the bluetooth* perms matter; on older, location does.
     return res[Permission.bluetoothScan]?.isGranted != false &&
@@ -61,7 +63,7 @@ class _PlaudImportScreenState extends State<PlaudImportScreen> {
       for (final r in store.all)
         if (r.deviceFileId != null) r.deviceFileId!,
     };
-    await _session.sync(cred, dev, skip: have);
+    await _session.sync(cred, dev, skip: have, fast: _fast);
     if (!mounted) return;
     // Persist whatever came down: unmask the Opus, wrap it in Ogg so the
     // normal decode -> transcribe path works, and keep the recorder's
@@ -142,6 +144,15 @@ class _PlaudImportScreenState extends State<PlaudImportScreen> {
               leading: const Icon(Icons.memory),
               title: Text(dev.name),
               subtitle: Text('serial ${dev.serial}'),
+            ),
+            SwitchListTile(
+              contentPadding: EdgeInsets.zero,
+              title: const Text('Fast transfer over WiFi'),
+              subtitle: const Text('The recorder opens its own WiFi network; '
+                  'the phone joins it for the download. Falls back to '
+                  'Bluetooth if that fails.'),
+              value: _fast,
+              onChanged: _running ? null : (v) => setState(() => _fast = v),
             ),
             const SizedBox(height: 8),
             FilledButton.icon(
