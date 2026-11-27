@@ -172,6 +172,14 @@ What happens afterwards depends on how you want to work:
   can list and download them with the same sign-in, which is faster than
   Bluetooth for long recordings. It only downloads, and only when you start
   it.
+- **Without the Plaud cloud.** The recorder accepts a key that LocalScribe
+  generates itself, so the Plaud account is not needed for the Bluetooth
+  connection (verified against a real recorder; see
+  `findings/plaud-fresh-enroll-verified.md`). Trade-off: the recorder is then
+  tied to LocalScribe's key instead of your Plaud account's, so you can no
+  longer use it in the regular Plaud app. Today the setup screen still signs
+  in to fetch the key, and the recorder's own public key has to be supplied
+  once; a fully cloud-free setup screen is not built yet.
 - **Never set up a recorder.** The app never contacts Plaud.
 
 Everything after the download (transcription, speaker recognition, notes)
