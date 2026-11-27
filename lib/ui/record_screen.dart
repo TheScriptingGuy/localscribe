@@ -1,20 +1,30 @@
 import 'dart:async';
 import 'dart:io';
+import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_foreground_task/flutter_foreground_task.dart';
+import 'package:image_picker/image_picker.dart';
 import 'package:provider/provider.dart';
 import 'package:record/record.dart';
+import 'package:uuid/uuid.dart';
 
 import '../models/recording.dart';
 import '../services/audio/recording_service.dart';
+import '../services/audio/wav_recorder.dart';
 import '../services/library/recording_store.dart';
+import '../services/models/whisper_models.dart';
+import '../services/transcription/live_captioner.dart';
+import '../settings/settings.dart';
 import 'format.dart';
+import 'record_widgets.dart';
 import 'recording_detail_screen.dart';
 import 'theme.dart';
 
-/// Phone-mic recorder. Writes 16 kHz mono AAC: small enough for Whisper APIs
-/// (~22 MB/hour, under the common 25 MB upload cap) and enough for speech.
+/// Phone-mic recorder. Writes 16 kHz mono WAV (~115 MB/hour, lossless, which
+  /// whisper.cpp reads directly), with highlights, photos, notes and optional
+  /// live captions while recording.
 class RecordScreen extends StatefulWidget {
   const RecordScreen({super.key});
 
@@ -23,17 +33,13 @@ class RecordScreen extends StatefulWidget {
 }
 
 class _RecordScreenState extends State<RecordScreen> {
-  static const _config = RecordConfig(
-    encoder: AudioEncoder.aacLc,
-    sampleRate: 16000,
-    numChannels: 1,
-    bitRate: 48000,
-  );
-
   final _recorder = AudioRecorder();
+  late final _wav = WavRecorder(_recorder);
   final _elapsed = Stopwatch();
   Timer? _ticker;
-  StreamSubscription<Amplitude>? _ampSub;
+  StreamSubscription<Uint8List>? _pcmSub;
+  LiveCaptioner? _captions;
+  var _captionsOpen = true;
 
   bool _recording = false;
   bool _paused = false;
@@ -41,6 +47,11 @@ class _RecordScreenState extends State<RecordScreen> {
   final _levels = <double>[];
   static const _maxLevels = 64;
   String? _error;
+
+  /// Highlights, photos and notes marked so far; photos wait in temp files
+  /// until the recording is saved.
+  final _markers = <RecordingMarker>[];
+  final _photos = <String, File>{};
 
   @override
   void initState() {
@@ -52,7 +63,8 @@ class _RecordScreenState extends State<RecordScreen> {
   void dispose() {
     FlutterForegroundTask.removeTaskDataCallback(_onNotificationAction);
     _ticker?.cancel();
-    _ampSub?.cancel();
+    _pcmSub?.cancel();
+    _captions?.dispose();
     _recorder.dispose();
     RecordingService.stop();
     super.dispose();
@@ -71,12 +83,12 @@ class _RecordScreenState extends State<RecordScreen> {
   }
 
   Future<void> _start() async {
-    if (!await _recorder.hasPermission()) {
+    if (!await _wav.hasPermission()) {
       setState(() => _error = 'Microphone permission was denied.');
       return;
     }
     final store = context.read<RecordingStore>();
-    final path = await store.newTempAudioPath('m4a');
+    final path = await store.newTempAudioPath('wav');
     // Start the foreground service first so the mic stays live with the
     // screen off. If it fails, record anyway — just foreground-only.
     String? serviceWarning;
@@ -86,7 +98,7 @@ class _RecordScreenState extends State<RecordScreen> {
       serviceWarning = 'Background recording unavailable ($e); keep the app open.';
     }
     try {
-      await _recorder.start(_config, path: path);
+      await _wav.start(path);
     } catch (e) {
       await RecordingService.stop();
       setState(() => _error = 'Could not start recording: $e');
@@ -98,11 +110,17 @@ class _RecordScreenState extends State<RecordScreen> {
       ..start();
     _ticker = Timer.periodic(
         const Duration(milliseconds: 250), (_) => setState(() {}));
-    _ampSub = _recorder
-        .onAmplitudeChanged(const Duration(milliseconds: 120))
-        .listen((a) {
-      // dBFS (-60..0) -> 0..1 for the level meter.
-      final level = ((a.current + 60) / 60).clamp(0.0, 1.0);
+    final settings = context.read<Settings>();
+    final models = context.read<WhisperModelManager>();
+    final captions = LiveCaptioner.tryCreate(settings, models);
+    captions?.addListener(() {
+      if (mounted) setState(() {});
+    });
+    _captions = captions;
+    _pcmSub = _wav.pcm.listen((chunk) {
+      captions?.feed(chunk);
+      final level = WavRecorder.level(chunk);
+      if (!mounted) return;
       setState(() {
         _levels.add(_paused ? 0 : level);
         if (_levels.length > _maxLevels) _levels.removeAt(0);
@@ -114,12 +132,90 @@ class _RecordScreenState extends State<RecordScreen> {
     });
   }
 
+  RecordingMarker _newMarker(MarkerType type, {String? text}) =>
+      RecordingMarker(
+        id: const Uuid().v4(),
+        atMs: _wav.durationMs,
+        type: type,
+        text: text,
+      );
+
+  void _flag() {
+    HapticFeedback.mediumImpact();
+    setState(() => _markers.add(_newMarker(MarkerType.flag)));
+    ScaffoldMessenger.of(context)
+      ..hideCurrentSnackBar()
+      ..showSnackBar(SnackBar(
+          duration: const Duration(seconds: 2),
+          content: Text('Highlight marked at ${formatDuration(_elapsed.elapsed)}')));
+  }
+
+  Future<void> _photo() async {
+    // The time is the moment the button was pressed, not when the camera closes.
+    final marker = _newMarker(MarkerType.photo);
+    try {
+      final shot = await ImagePicker().pickImage(
+          source: ImageSource.camera, imageQuality: 85, maxWidth: 1920);
+      if (shot == null || !mounted) return;
+      setState(() {
+        _markers.add(marker);
+        _photos[marker.id] = File(shot.path);
+      });
+    } catch (e) {
+      if (mounted) setState(() => _error = 'Could not take a photo: $e');
+    }
+  }
+
+  Future<void> _note() async {
+    final marker = _newMarker(MarkerType.note);
+    final ctrl = TextEditingController();
+    final text = await showModalBottomSheet<String>(
+      context: context,
+      isScrollControlled: true,
+      showDragHandle: true,
+      builder: (ctx) => Padding(
+        padding: EdgeInsets.fromLTRB(
+            24, 0, 24, 24 + MediaQuery.viewInsetsOf(ctx).bottom),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text('Add a note at ${formatDuration(Duration(milliseconds: marker.atMs))}',
+                style: Theme.of(ctx).textTheme.titleLarge),
+            const SizedBox(height: 12),
+            TextField(
+              controller: ctrl,
+              autofocus: true,
+              minLines: 2,
+              maxLines: 5,
+              textCapitalization: TextCapitalization.sentences,
+              decoration: const InputDecoration(
+                  hintText: 'Key point, idea or reminder'),
+            ),
+            const SizedBox(height: 16),
+            Align(
+              alignment: Alignment.centerRight,
+              child: FilledButton(
+                onPressed: () => Navigator.pop(ctx, ctrl.text.trim()),
+                child: const Text('Add note'),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+    ctrl.dispose();
+    if (text == null || text.isEmpty || !mounted) return;
+    setState(() => _markers.add(RecordingMarker(
+        id: marker.id, atMs: marker.atMs, type: MarkerType.note, text: text)));
+  }
+
   Future<void> _togglePause() async {
     if (_paused) {
-      await _recorder.resume();
+      await _wav.resume();
       _elapsed.start();
     } else {
-      await _recorder.pause();
+      await _wav.pause();
       _elapsed.stop();
     }
     setState(() => _paused = !_paused);
@@ -131,23 +227,29 @@ class _RecordScreenState extends State<RecordScreen> {
     final navigator = Navigator.of(context);
     _elapsed.stop();
     _ticker?.cancel();
-    await _ampSub?.cancel();
-    final path = await _recorder.stop();
-    await RecordingService.stop();
-    if (path == null) {
+    _captions?.stop();
+    await _pcmSub?.cancel();
+    final String path;
+    try {
+      path = await _wav.stop();
+    } catch (e) {
+      await RecordingService.stop();
       setState(() {
         _recording = false;
-        _error = 'Recording produced no file.';
+        _error = 'Recording produced no file: $e';
       });
       return;
     }
+    await RecordingService.stop();
     final now = DateTime.now();
     final rec = await store.add(
       File(path),
       title: 'Recording ${formatDate(now)}',
       source: RecordingSource.mic,
-      durationMs: _elapsed.elapsedMilliseconds,
+      durationMs: _wav.durationMs,
       move: true,
+      markers: List.of(_markers)..sort((a, b) => a.atMs.compareTo(b.atMs)),
+      photos: Map.of(_photos),
     );
     navigator.pushReplacement(MaterialPageRoute(
         builder: (_) => RecordingDetailScreen(recordingId: rec.id)));
@@ -155,8 +257,14 @@ class _RecordScreenState extends State<RecordScreen> {
 
   Future<void> _discard() async {
     _ticker?.cancel();
-    await _ampSub?.cancel();
-    await _recorder.cancel(); // stops and deletes the temp file
+    _captions?.stop();
+    await _pcmSub?.cancel();
+    await _wav.cancel(); // stops and deletes the temp file
+    for (final f in _photos.values) {
+      try {
+        await f.delete();
+      } catch (_) {}
+    }
     await RecordingService.stop();
     if (mounted) Navigator.of(context).pop();
   }
@@ -192,8 +300,9 @@ class _RecordScreenState extends State<RecordScreen> {
                       Container(
                         width: 8,
                         height: 8,
-                        decoration: const BoxDecoration(
-                            color: Palette.danger, shape: BoxShape.circle),
+                        decoration: BoxDecoration(
+                            color: context.colors.danger,
+                            shape: BoxShape.circle),
                       ),
                       const SizedBox(width: 8),
                     ],
@@ -201,7 +310,7 @@ class _RecordScreenState extends State<RecordScreen> {
                       !_recording
                           ? 'Phone microphone'
                           : 'Keeps recording with the screen off',
-                      style: const TextStyle(color: Palette.muted, fontSize: 15),
+                      style: TextStyle(color: context.colors.muted, fontSize: 15),
                     ),
                   ],
                 ),
@@ -223,10 +332,51 @@ class _RecordScreenState extends State<RecordScreen> {
                     painter: _WaveformPainter(
                       levels: _levels,
                       slots: _maxLevels,
-                      color: _paused ? Palette.faint : Palette.text,
+                      color: _paused ? context.colors.faint : context.colors.text,
                     ),
                   ),
                 ),
+                if (_recording && _captions != null) ...[
+                  const SizedBox(height: 16),
+                  CaptionsPanel(
+                    lines: _captions!.recentLines(),
+                    open: _captionsOpen,
+                    error: _captions!.error,
+                    onToggle: () =>
+                        setState(() => _captionsOpen = !_captionsOpen),
+                  ),
+                ],
+                if (_recording) ...[
+                  const SizedBox(height: 24),
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                    children: [
+                      MarkerButton(
+                          icon: Icons.flag_outlined,
+                          label: 'Highlight',
+                          onPressed: _flag),
+                      MarkerButton(
+                          icon: Icons.photo_camera_outlined,
+                          label: 'Photo',
+                          onPressed: _photo),
+                      MarkerButton(
+                          icon: Icons.edit_note,
+                          label: 'Note',
+                          onPressed: _note),
+                    ],
+                  ),
+                  if (_markers.isNotEmpty)
+                    Padding(
+                      padding: const EdgeInsets.only(top: 12),
+                      child: Center(
+                        child: Text(
+                          '${_markers.length} marked moment${_markers.length == 1 ? '' : 's'}',
+                          style: TextStyle(
+                              color: context.colors.muted, fontSize: 13),
+                        ),
+                      ),
+                    ),
+                ],
                 if (_error != null) ...[
                   const SizedBox(height: 16),
                   Text(_error!, style: TextStyle(color: scheme.error)),
@@ -234,7 +384,7 @@ class _RecordScreenState extends State<RecordScreen> {
                 const Spacer(),
                 if (!_recording)
                   Center(
-                    child: _RoundButton(
+                    child: RoundButton(
                       tooltip: 'Start recording',
                       icon: Icons.mic,
                       onPressed: _start,
@@ -248,13 +398,13 @@ class _RecordScreenState extends State<RecordScreen> {
                         tooltip: 'Discard',
                         iconSize: 28,
                         style: IconButton.styleFrom(
-                          backgroundColor: Palette.fill,
+                          backgroundColor: context.colors.fill,
                           fixedSize: const Size(60, 60),
                         ),
                         onPressed: _confirmDiscard,
                         icon: const Icon(Icons.delete_outline),
                       ),
-                      _RoundButton(
+                      RoundButton(
                         tooltip: 'Stop and save',
                         icon: Icons.stop_rounded,
                         onPressed: _stop,
@@ -263,7 +413,7 @@ class _RecordScreenState extends State<RecordScreen> {
                         tooltip: _paused ? 'Resume' : 'Pause',
                         iconSize: 28,
                         style: IconButton.styleFrom(
-                          backgroundColor: Palette.fill,
+                          backgroundColor: context.colors.fill,
                           fixedSize: const Size(60, 60),
                         ),
                         onPressed: _togglePause,
@@ -297,34 +447,6 @@ class _RecordScreenState extends State<RecordScreen> {
       ),
     );
     if (ok == true) await _discard();
-  }
-}
-
-class _RoundButton extends StatelessWidget {
-  final String tooltip;
-  final IconData icon;
-  final VoidCallback onPressed;
-  const _RoundButton(
-      {required this.tooltip, required this.icon, required this.onPressed});
-
-  @override
-  Widget build(BuildContext context) {
-    return Tooltip(
-      message: tooltip,
-      child: Material(
-        color: Palette.text,
-        shape: const CircleBorder(),
-        clipBehavior: Clip.antiAlias,
-        child: InkWell(
-          onTap: onPressed,
-          child: SizedBox(
-            width: 88,
-            height: 88,
-            child: Icon(icon, color: Colors.white, size: 40),
-          ),
-        ),
-      ),
-    );
   }
 }
 

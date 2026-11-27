@@ -1,7 +1,7 @@
 name: localscribe
 description: Local-first voice recording, transcription and AI notes. No cloud lock-in.
 publish_to: "none"
-version: 0.1.0+1
+version: 0.2.0+2
 
 environment:
   sdk: ">=3.3.0 <4.0.0"
@@ -26,6 +26,9 @@ dependencies:
   record: ^7.1.2
   just_audio: ^0.10.6
   file_picker: ^13.3.1
+  share_plus: ">=11.0.0 <14.0.0"
+  pdf: ^3.11.0
+  image_picker: ^1.1.2
   flutter_foreground_task: ^11.0.3 # keeps mic recording alive in background
 
   # On-device transcription: whisper.cpp + MediaCodec decoding via FFI
@@ -43,6 +46,7 @@ dependencies:
   # BLE (Plaud device, Phase 5). flutter_reactive_ble is Apache-2.0 (FOSS),
   # unlike flutter_blue_plus 1.x (compileSdk 33) / 2.x (non-free license).
   flutter_reactive_ble: ^5.3.1
+  wifi_iot: ^0.3.19 # joins the recorder's access point for fast transfer
   permission_handler: ^11.3.1
   # RSA PEM parsing for the imported Plaud key (thin wrapper over pointycastle).
   basic_utils: ^5.7.0
@@ -67,3 +71,4 @@ flutter:
   uses-material-design: true
   assets:
     - assets/templates/
+    - assets/fonts/

@@ -12,6 +12,7 @@ class PromptBuilder {
     required NoteTemplate template,
     required String transcript,
     String? languageHint,
+    String? highlights,
   }) {
     final b = StringBuffer();
     b.writeln(
@@ -36,10 +37,20 @@ class PromptBuilder {
         b.writeln('- $s');
       }
     }
+    if (highlights != null && highlights.trim().isNotEmpty) {
+      b.writeln();
+      b.writeln('HIGHLIGHTS: while recording, the speaker marked these moments '
+          'as important. Give them extra weight, and end the note with a '
+          '"## Highlights" section that says what each marked moment was '
+          'about (use the transcript around it).');
+      b.writeln(highlights.trim());
+    }
     b.writeln();
     b.writeln('RULES:');
     b.writeln('- Stay strictly grounded in the transcript; never invent facts.');
-    b.writeln('- Start the note with a single # title line.');
+    b.writeln('- Start the note with a single # title line: a short, specific '
+        'title (at most 8 words) saying what this recording is about, '
+        'not the name of the template.');
     if (languageHint != null && languageHint.isNotEmpty && languageHint != 'auto') {
       b.writeln('- Write the note in: $languageHint.');
     } else {

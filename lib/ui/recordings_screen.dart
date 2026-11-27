@@ -60,7 +60,7 @@ class OptionsButton extends StatelessWidget {
       padding: const EdgeInsets.only(right: 16),
       child: IconButton(
         tooltip: 'Options',
-        style: IconButton.styleFrom(backgroundColor: Palette.fill),
+        style: IconButton.styleFrom(backgroundColor: context.colors.fill),
         icon: const Icon(Icons.tune),
         onPressed: () => Navigator.of(context)
             .push(MaterialPageRoute(builder: (_) => const OptionsScreen())),
@@ -69,15 +69,42 @@ class OptionsButton extends StatelessWidget {
   }
 }
 
-/// The library: every recording on this phone, newest first.
-class RecordingsScreen extends StatelessWidget {
+/// The library: every recording on this phone, newest first, searchable.
+class RecordingsScreen extends StatefulWidget {
   const RecordingsScreen({super.key});
+
+  @override
+  State<RecordingsScreen> createState() => _RecordingsScreenState();
+}
+
+class _RecordingsScreenState extends State<RecordingsScreen> {
+  final _search = TextEditingController();
+  RecordingSource? _source; // null = all
+
+  @override
+  void dispose() {
+    _search.dispose();
+    super.dispose();
+  }
+
+  bool _matches(Recording r, String q) {
+    if (q.isEmpty) return true;
+    if (r.title.toLowerCase().contains(q)) return true;
+    if (r.transcript?.text.toLowerCase().contains(q) == true) return true;
+    return r.notes.any((n) => n.content.toLowerCase().contains(q));
+  }
 
   @override
   Widget build(BuildContext context) {
     final store = context.watch<RecordingStore>();
     final jobs = context.watch<TranscriptionJobs>();
-    final items = store.all;
+    final q = _search.text.trim().toLowerCase();
+    final all = store.all;
+    final items = all
+        .where((r) => _source == null || r.source == _source)
+        .where((r) => _matches(r, q))
+        .toList();
+    final filtering = q.isNotEmpty || _source != null;
 
     return Scaffold(
       appBar: AppBar(
@@ -88,15 +115,58 @@ class RecordingsScreen extends StatelessWidget {
       ),
       body: ListView.builder(
         padding: const EdgeInsets.only(bottom: 120),
-        itemCount: items.length + 2,
+        itemCount: items.length + 4,
         itemBuilder: (_, i) {
           if (i == 0) return const PageHeader('All files');
           if (i == 1) {
-            return items.isEmpty
-                ? const _EmptyState()
-                : const Divider(height: 1, indent: 24, endIndent: 24);
+            if (all.isEmpty) return const SizedBox.shrink();
+            return Padding(
+              padding: const EdgeInsets.fromLTRB(24, 0, 24, 12),
+              child: TextField(
+                controller: _search,
+                onChanged: (_) => setState(() {}),
+                decoration: InputDecoration(
+                  hintText: 'Search titles, transcripts and notes',
+                  prefixIcon: const Icon(Icons.search),
+                  suffixIcon: q.isEmpty
+                      ? null
+                      : IconButton(
+                          icon: const Icon(Icons.close),
+                          onPressed: () => setState(_search.clear),
+                        ),
+                  contentPadding: const EdgeInsets.symmetric(vertical: 10),
+                ),
+              ),
+            );
           }
-          final r = items[i - 2];
+          if (i == 2) {
+            if (all.isEmpty) return const SizedBox.shrink();
+            return Padding(
+              padding: const EdgeInsets.fromLTRB(24, 0, 24, 12),
+              child: Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                children: [
+                  _filterChip('All', null),
+                  _filterChip('Phone', RecordingSource.mic),
+                  _filterChip('Imported', RecordingSource.import),
+                  _filterChip('Plaud', RecordingSource.plaud),
+                ],
+              ),
+            );
+          }
+          if (i == 3) {
+            if (all.isEmpty) return const _EmptyState();
+            if (items.isEmpty && filtering) {
+              return Padding(
+                padding: const EdgeInsets.fromLTRB(24, 32, 24, 24),
+                child: Text('No recordings match.',
+                    style: TextStyle(color: context.colors.muted)),
+              );
+            }
+            return const Divider(height: 1, indent: 24, endIndent: 24);
+          }
+          final r = items[i - 4];
           return Column(
             children: [
               _RecordingRow(
@@ -104,6 +174,7 @@ class RecordingsScreen extends StatelessWidget {
                 transcribing:
                     jobs.isRunning(r.id) ? (jobs.progressOf(r.id) ?? 0) : null,
                 phase: jobs.phaseOf(r.id)?.label,
+                preview: _preview(r),
               ),
               const Divider(height: 1, indent: 24, endIndent: 24),
             ],
@@ -111,6 +182,34 @@ class RecordingsScreen extends StatelessWidget {
         },
       ),
     );
+  }
+
+  Widget _filterChip(String label, RecordingSource? source) => ChoiceChip(
+        // Explicit colour: the theme's state-dependent label style is not
+        // applied to unselected chips, which left them white on grey.
+        label: Text(label,
+            style: TextStyle(
+                fontSize: 13,
+                color: _source == source
+                    ? context.colors.inverse
+                    : context.colors.text)),
+        selected: _source == source,
+        showCheckmark: false,
+        onSelected: (_) => setState(() => _source = source),
+      );
+
+  /// One line of what the recording says: the newest note's first text line,
+  /// else the start of the transcript.
+  static String? _preview(Recording r) {
+    for (final n in r.notes) {
+      for (final line in n.content.split('\n')) {
+        final t = line.trim();
+        if (t.isEmpty || t.startsWith('#')) continue;
+        return t.replaceAll('*', '').replaceAll('`', '');
+      }
+    }
+    final text = r.transcript?.text.trim() ?? '';
+    return text.isEmpty ? null : text;
   }
 }
 
@@ -120,13 +219,14 @@ class _RecordingRow extends StatelessWidget {
   /// Transcription progress 0..1 while a job runs, else null.
   final double? transcribing;
   final String? phase;
+  final String? preview;
   const _RecordingRow(
-      {required this.recording, this.transcribing, this.phase});
+      {required this.recording, this.transcribing, this.phase, this.preview});
 
   @override
   Widget build(BuildContext context) {
     final r = recording;
-    const meta = TextStyle(color: Palette.muted, fontSize: 15);
+    final meta = TextStyle(color: context.colors.muted, fontSize: 15);
     final t = transcribing;
     return InkWell(
       onTap: () => Navigator.of(context).push(MaterialPageRoute(
@@ -150,7 +250,18 @@ class _RecordingRow extends StatelessWidget {
                 ],
               ],
             ),
-            if (t != null || r.transcript != null || r.notes.isNotEmpty) ...[
+            if (preview != null && t == null) ...[
+              const SizedBox(height: 8),
+              Text(preview!,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                      color: context.colors.muted, fontSize: 14, height: 1.3)),
+            ],
+            if (t != null ||
+                r.transcript != null ||
+                r.notes.isNotEmpty ||
+                r.markers.isNotEmpty) ...[
               const SizedBox(height: 10),
               Row(
                 children: [
@@ -173,6 +284,12 @@ class _RecordingRow extends StatelessWidget {
                             ? '1 speaker'
                             : '${_speakerCount(r)} speakers',
                       ),
+                    if (r.markers.isNotEmpty)
+                      _Badge(
+                        icon: Icons.flag_outlined,
+                        label:
+                            '${r.markers.length} highlight${r.markers.length == 1 ? '' : 's'}',
+                      ),
                     if (r.notes.isNotEmpty)
                       _Badge(
                         icon: Icons.edit_note,
@@ -188,7 +305,7 @@ class _RecordingRow extends StatelessWidget {
                       RecordingSource.plaud => Icons.bluetooth_audio,
                     },
                     size: 18,
-                    color: Palette.faint,
+                    color: context.colors.faint,
                   ),
                 ],
               ),
@@ -214,7 +331,7 @@ class _MetaSeparator extends StatelessWidget {
         width: 1,
         height: 14,
         margin: const EdgeInsets.symmetric(horizontal: 12),
-        color: Palette.line,
+        color: context.colors.line,
       );
 }
 
@@ -230,10 +347,10 @@ class _Badge extends StatelessWidget {
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Icon(icon, size: 18, color: Palette.muted),
+          Icon(icon, size: 18, color: context.colors.muted),
           const SizedBox(width: 4),
           Text(label,
-              style: const TextStyle(color: Palette.muted, fontSize: 13)),
+              style: TextStyle(color: context.colors.muted, fontSize: 13)),
         ],
       ),
     );
@@ -245,16 +362,16 @@ class _EmptyState extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return const Padding(
-      padding: EdgeInsets.fromLTRB(24, 48, 24, 24),
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(24, 48, 24, 24),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text('No recordings yet', style: TextStyle(fontSize: 18)),
-          SizedBox(height: 8),
+          const Text('No recordings yet', style: TextStyle(fontSize: 18)),
+          const SizedBox(height: 8),
           Text(
             'Tap + to record with the phone mic or import an audio file.',
-            style: TextStyle(color: Palette.muted, fontSize: 15),
+            style: TextStyle(color: context.colors.muted, fontSize: 15),
           ),
         ],
       ),

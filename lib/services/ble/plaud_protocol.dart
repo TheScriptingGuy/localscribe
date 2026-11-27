@@ -121,6 +121,10 @@ class PlaudCommands {
 
   int get nextSeq => _seq;
 
+  /// Claims the next sequence number for a message sent outside BLE (the
+  /// WiFi link shares the BLE session's counter).
+  int takeSeq() => _seq++;
+
   Uint8List _control(int op, List<int> content, {int status = 0}) {
     final b = BytesBuilder()
       ..add(_le32(_seq++))
@@ -136,8 +140,13 @@ class PlaudCommands {
   /// op 0x6c — device info (name).
   Uint8List deviceInfo() => _control(0x6c, const []);
 
-  /// op 0x03 — request next file / listing.
-  Uint8List listNext() => _control(0x03, const []);
+  /// op 0x1a — list pending files. Content = `[echo:4][count:4 LE]` +
+  /// `count` × `[fileId:4][size:4 LE][flags:2]` records. Verified against a
+  /// live capture of the real app (`findings/decoded_live_capture.txt`):
+  /// `op 0x03` always echoes back an empty/"no file" shape regardless of
+  /// what's actually queued — it is NOT the list opcode, despite earlier
+  /// notes assuming so. Use the top-level [parseFileList] on the response.
+  Uint8List listFiles() => _control(0x1a, List<int>.filled(9, 0));
 
   /// op 0x1c — download: [fileId:4][offset:4][blockSize:4].
   Uint8List download(int fileId, int offset, int blockSize) => _control(
@@ -150,6 +159,33 @@ class PlaudCommands {
 
   static List<int> _le32(int v) =>
       [v & 0xFF, (v >> 8) & 0xFF, (v >> 16) & 0xFF, (v >> 24) & 0xFF];
+}
+
+/// One entry from an `op 0x1a` file-list response.
+class PlaudFileEntry {
+  final int fileId;
+  final int size;
+  final int flags;
+  PlaudFileEntry(this.fileId, this.size, this.flags);
+}
+
+/// Parses an `op 0x1a` response content into its file records.
+List<PlaudFileEntry> parseFileList(Uint8List content) {
+  final entries = <PlaudFileEntry>[];
+  if (content.length < 8) return entries;
+  final count = content.buffer
+      .asByteData(content.offsetInBytes)
+      .getUint32(4, Endian.little);
+  var off = 8;
+  for (var i = 0; i < count && off + 10 <= content.length; i++) {
+    final bd = content.buffer.asByteData(content.offsetInBytes + off);
+    final fileId = bd.getUint32(0, Endian.little);
+    final size = bd.getUint32(4, Endian.little);
+    final flags = bd.getUint16(8, Endian.little);
+    entries.add(PlaudFileEntry(fileId, size, flags));
+    off += 10;
+  }
+  return entries;
 }
 
 /// Collects type-0x02 data frames for one file id and reassembles the file

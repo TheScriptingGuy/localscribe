@@ -1,17 +1,22 @@
 import 'dart:async';
+import 'dart:developer' as developer;
 import 'dart:io';
 import 'dart:typed_data';
 
 import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_reactive_ble/flutter_reactive_ble.dart';
+import 'package:just_audio/just_audio.dart';
 import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:provider/provider.dart';
 
 import '../models/recording.dart';
+import '../services/ble/plaud_container.dart';
 import '../services/ble/plaud_credentials.dart';
+import '../services/ble/plaud_crypto.dart';
+import '../services/ble/plaud_import.dart';
 import '../services/library/recording_store.dart';
 import '../services/plaud/plaud_cloud_api.dart';
 import 'plaud_import_screen.dart';
@@ -167,12 +172,85 @@ class _PlaudDevicesScreenState extends State<PlaudDevicesScreen> {
         final resp = await dio.get<List<int>>(url,
             options: Options(responseType: ResponseType.bytes));
         final bytes = Uint8List.fromList(resp.data!);
-        final f = File(p.join(tmp.path, 'plaud_${r.id}.mp3'));
-        await f.writeAsBytes(bytes, flush: true);
+        final head = bytes
+            .take(16)
+            .map((b) => b.toRadixString(16).padLeft(2, '0'))
+            .join(' ');
+        developer.log(
+            'cloud file ${r.id}: ${bytes.length} B, '
+            'type=${resp.headers.value('content-type')}, head=$head',
+            name: 'PlaudSync');
+
+        var durationMs = r.durationMs;
+        var markers = const <RecordingMarker>[];
+        File f;
+        final container = PlaudContainer(bytes);
+        if (container.looksValid) {
+          // Private Cloud Sync stores the recorder's end-to-end encrypted
+          // PLAUD.AI container as-is; unmask it with the account's RSA key,
+          // exactly like a BLE download.
+          final pem = cred.rsaPrivateKeyPem;
+          if (pem == null || pem.isEmpty) {
+            throw StateError(
+                'Recording ${r.id} is end-to-end encrypted, but no Plaud key '
+                'is loaded. Sign in again to fetch it.');
+          }
+          final audio = container.decode(PlaudCrypto.privateKeyFromPem(pem));
+          if (audio.packets.isEmpty) {
+            throw StateError(
+                'Could not decrypt recording ${r.id} with the loaded Plaud key.');
+          }
+          durationMs = audio.durationMs;
+          markers = recorderMarkers(audio.markMs);
+          f = File(p.join(tmp.path, 'plaud_${r.id}.opus'));
+          await f.writeAsBytes(PlaudContainer.oggOpusOf(audio.packets),
+              flush: true);
+        } else if (_isRawPlaudOpus(bytes)) {
+          // The cloud usually serves the recorder's audio already decrypted
+          // but still as bare 80-byte Opus units (no container). Wrap them in
+          // Ogg so the player and transcriber can read them.
+          final packets = <Uint8List>[];
+          final marks = <int>[];
+          for (var off = 0;
+              off + PlaudContainer.unitSize <= bytes.length;
+              off += PlaudContainer.unitSize) {
+            final pkt = Uint8List.fromList(
+                bytes.sublist(off, off + PlaudContainer.unitSize));
+            if (pkt[0] == PlaudContainer.markToc) {
+              marks.add(packets.length * PlaudContainer.unitMs);
+              pkt[0] = _plaudToc;
+            }
+            packets.add(pkt);
+          }
+          durationMs = packets.length * PlaudContainer.unitMs;
+          markers = recorderMarkers(marks);
+          f = File(p.join(tmp.path, 'plaud_${r.id}.opus'));
+          await f.writeAsBytes(PlaudContainer.oggOpusOf(packets), flush: true);
+        } else {
+          f = File(p.join(tmp.path, 'plaud_${r.id}${_audioExt(bytes)}'));
+          await f.writeAsBytes(bytes, flush: true);
+        }
+        // The file list carries the duration (ms); fall back to probing the
+        // file if the server didn't report one.
+        if (durationMs <= 0) {
+          final probe = AudioPlayer();
+          try {
+            durationMs = (await probe.setFilePath(f.path))?.inMilliseconds ?? 0;
+          } catch (_) {
+            // Unknown to the player; still transcribable.
+          } finally {
+            await probe.dispose();
+          }
+        }
         await store.add(
           f,
           title: r.filename.isEmpty ? r.id : r.filename,
           source: RecordingSource.plaud,
+          durationMs: durationMs,
+          markers: markers,
+          createdAt: r.startTimeMs > 0
+              ? DateTime.fromMillisecondsSinceEpoch(r.startTimeMs)
+              : null,
           move: true,
         );
         saved++;
@@ -190,27 +268,50 @@ class _PlaudDevicesScreenState extends State<PlaudDevicesScreen> {
     }
   }
 
-  /// Pull a device serial out of the manufacturer data. The Plaud advert
-  /// carries the model (first 3 digits) + serial as ASCII hex; find the 18-hex
-  /// run (`888…` / `881…`) and return it uppercased.
+  /// Opus TOC of every Plaud recorder packet (CELT WB, mono, 20 ms).
+  static const int _plaudToc = 0xb8;
+
+  /// Bare Plaud Opus stream: a whole number of 80-byte units, each starting
+  /// with the recorder's TOC (or the highlight-mark TOC). Checks every unit,
+  /// so a random file can't pass by chance.
+  static bool _isRawPlaudOpus(Uint8List b) {
+    const n = PlaudContainer.unitSize;
+    if (b.isEmpty || b.length % n != 0) return false;
+    for (var off = 0; off < b.length; off += n) {
+      final toc = b[off];
+      if (toc != _plaudToc && toc != PlaudContainer.markToc) return false;
+    }
+    return true;
+  }
+
+  /// Pick a file extension from the audio's magic bytes. `is_opus=1` returns
+  /// Ogg Opus, not MP3, and a wrong extension trips up decoders.
+  static String _audioExt(Uint8List b) {
+    bool at(int o, List<int> sig) {
+      if (b.length < o + sig.length) return false;
+      for (var i = 0; i < sig.length; i++) {
+        if (b[o + i] != sig[i]) return false;
+      }
+      return true;
+    }
+
+    if (at(0, const [0x4F, 0x67, 0x67, 0x53])) return '.ogg'; // OggS
+    if (at(0, const [0x52, 0x49, 0x46, 0x46])) return '.wav'; // RIFF
+    if (at(4, const [0x66, 0x74, 0x79, 0x70])) return '.m4a'; // ftyp
+    return '.mp3';
+  }
+
+  /// Pull a device serial out of the manufacturer data. It's 9 raw binary
+  /// bytes at a fixed offset (bytes 11-19), not ASCII text — hex-encode them
+  /// directly. See `PlaudDevice._serialIn` for the live capture that proved
+  /// this offset.
   String? _serialIn(Uint8List data) {
-    if (data.isEmpty) return null;
+    if (data.length < 20) return null;
     final sb = StringBuffer();
-    for (final b in data) {
-      final c = b & 0xff;
-      if (c >= 32 && c < 127) sb.writeCharCode(c);
+    for (var i = 11; i < 20; i++) {
+      sb.write(data[i].toRadixString(16).padLeft(2, '0'));
     }
-    final runs = RegExp(r'[0-9A-Fa-f]+')
-        .allMatches(sb.toString())
-        .map((m) => m.group(0)!)
-        .toList();
-    for (final r in runs) {
-      if (r.length == 18) return r.toUpperCase();
-    }
-    for (final r in runs) {
-      if (r.length >= 16 && r.length <= 20) return r.toUpperCase();
-    }
-    return null;
+    return sb.toString().toUpperCase();
   }
 
   @override
@@ -225,16 +326,17 @@ class _PlaudDevicesScreenState extends State<PlaudDevicesScreen> {
   Widget _signInBody() => ListView(
         padding: const EdgeInsets.all(16),
         children: [
-          const Text(
+          Text(
             'Sign in to Plaud to pair every recorder on your account.',
-            style: TextStyle(color: Palette.muted, height: 1.4),
+            style: TextStyle(color: context.colors.muted, height: 1.4),
           ),
           const SizedBox(height: 8),
-          const Text(
+          Text(
             'Your password is sealed with the Plaud server key before it leaves '
             'this device, and only your escrowed e2ee key + device signatures '
             'are stored here. Nothing is sent to LocalScribe.',
-            style: TextStyle(color: Palette.faint, height: 1.4, fontSize: 13),
+            style: TextStyle(
+                color: context.colors.faint, height: 1.4, fontSize: 13),
           ),
           const SizedBox(height: 20),
           TextField(
@@ -261,7 +363,7 @@ class _PlaudDevicesScreenState extends State<PlaudDevicesScreen> {
           ),
           if (_error != null) ...[
             const SizedBox(height: 12),
-            Text(_error!, style: const TextStyle(color: Palette.danger)),
+            Text(_error!, style: TextStyle(color: context.colors.danger)),
           ],
         ],
       );
@@ -291,14 +393,14 @@ class _PlaudDevicesScreenState extends State<PlaudDevicesScreen> {
                 _scanning
                     ? 'Looking for nearby recorders…'
                     : 'Nearby: ${_nearbyIds.length} recorder(s) advertising',
-                style: const TextStyle(color: Palette.muted),
+                style: TextStyle(color: context.colors.muted),
               ),
             ),
           if (cred.devices.isEmpty)
-            const Padding(
-              padding: EdgeInsets.symmetric(vertical: 24),
+            Padding(
+              padding: const EdgeInsets.symmetric(vertical: 24),
               child: Text('No devices on this account.',
-                  style: TextStyle(color: Palette.muted)),
+                  style: TextStyle(color: context.colors.muted)),
             )
           else
             ...cred.devices.map((d) => _deviceCard(d)),
@@ -310,7 +412,7 @@ class _PlaudDevicesScreenState extends State<PlaudDevicesScreen> {
           ),
           if (_error != null) ...[
             const SizedBox(height: 12),
-            Text(_error!, style: const TextStyle(color: Palette.danger)),
+            Text(_error!, style: TextStyle(color: context.colors.danger)),
           ],
           const SizedBox(height: 24),
           const Divider(),
@@ -320,9 +422,9 @@ class _PlaudDevicesScreenState extends State<PlaudDevicesScreen> {
               await context.read<PlaudCredentials>().clear();
               if (mounted) setState(() {});
             },
-            icon: const Icon(Icons.logout, color: Palette.danger),
-            label: const Text('Sign out of Plaud',
-                style: TextStyle(color: Palette.danger)),
+            icon: Icon(Icons.logout, color: context.colors.danger),
+            label: Text('Sign out of Plaud',
+                style: TextStyle(color: context.colors.danger)),
           ),
         ],
       );
@@ -344,8 +446,8 @@ class _PlaudDevicesScreenState extends State<PlaudDevicesScreen> {
             children: [
               CircleAvatar(
                 radius: 22,
-                backgroundColor: Palette.fill,
-                foregroundColor: Palette.text,
+                backgroundColor: context.colors.fill,
+                foregroundColor: context.colors.text,
                 child: const Icon(Icons.headphones_outlined),
               ),
               const SizedBox(width: 12),
@@ -359,15 +461,17 @@ class _PlaudDevicesScreenState extends State<PlaudDevicesScreen> {
                     const SizedBox(height: 2),
                     Text(
                       '${_modelLabel(d.serial)} · ${d.serial}',
-                      style: const TextStyle(color: Palette.muted, fontSize: 13),
+                      style: TextStyle(color: context.colors.muted, fontSize: 13),
                     ),
                   ],
                 ),
               ),
-              _badge(paired ? 'Paired' : 'No key', paired ? null : Palette.danger),
+              paired
+                  ? _badge('Paired', null, null)
+                  : _badge('No key', context.colors.danger, Colors.white),
               if (nearby) ...[
                 const SizedBox(width: 6),
-                _badge('Nearby', Palette.text),
+                _badge('Nearby', context.colors.text, context.colors.inverse),
               ],
             ],
           ),
@@ -391,16 +495,16 @@ class _PlaudDevicesScreenState extends State<PlaudDevicesScreen> {
     }
   }
 
-  Widget _badge(String label, Color? color) => Container(
+  Widget _badge(String label, Color? bg, Color? fg) => Container(
         padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
         decoration: BoxDecoration(
-          color: color ?? Palette.fill,
+          color: bg ?? context.colors.fill,
           borderRadius: BorderRadius.circular(999),
         ),
         child: Text(
           label,
           style: TextStyle(
-            color: color == null ? Palette.text : Colors.white,
+            color: fg ?? context.colors.text,
             fontSize: 12,
             fontWeight: FontWeight.w600,
           ),

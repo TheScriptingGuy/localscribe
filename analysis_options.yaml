@@ -6,6 +6,10 @@ linter:
     avoid_print: false
 
 analyzer:
+  exclude:
+    # Copied into lib/ by tool/fdroid/prepare.sh; its imports are relative to
+    # lib/services/diarization/.
+    - tool/fdroid/**
   errors:
     # Keep CI builds unblocked on style-only issues during early phases.
     deprecated_member_use: warning

@@ -1,0 +1,31 @@
+{
+  "id": "study_guide",
+  "name": "Study Guide & Flashcards",
+  "description": "Turn a lesson into a revision sheet with questions and flashcards.",
+  "verbatim": false,
+  "source": "Original LocalScribe template.",
+  "category": "education",
+  "icon": "cards",
+  "tags": [
+    "flashcards",
+    "exam",
+    "revision",
+    "quiz",
+    "study guide",
+    "learning"
+  ],
+  "outline": [
+    "Summarize the lesson in one short paragraph.",
+    "List the key concepts as bullets, each with a one-sentence explanation.",
+    "Write flashcards in the form 'Q: ... / A: ...' covering the most testable facts, between five and fifteen depending on length.",
+    "Add three to five practice questions that need a longer answer.",
+    "Only use facts from the recording; do not add outside knowledge."
+  ],
+  "sections": [
+    "Summary",
+    "Key Concepts",
+    "Flashcards",
+    "Practice Questions"
+  ],
+  "example": "## Flashcards\n**Q:** What does ATP store?\n**A:** Chemical energy for the cell."
+}

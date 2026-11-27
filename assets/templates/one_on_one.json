@@ -1,0 +1,32 @@
+{
+  "id": "one_on_one",
+  "name": "1:1 Check-in",
+  "description": "Notes from a one-to-one: topics, feedback, support needed and agreed follow-ups.",
+  "verbatim": false,
+  "source": "Original LocalScribe template.",
+  "category": "meeting",
+  "icon": "person",
+  "tags": [
+    "1:1",
+    "one on one",
+    "manager",
+    "feedback",
+    "check-in",
+    "coaching"
+  ],
+  "outline": [
+    "Summarize the topics in the order they were discussed, one short paragraph or a few bullets each.",
+    "Capture feedback given in either direction, worded respectfully and close to what was said.",
+    "Note anything the person asked for or needs support with.",
+    "List agreed follow-ups with owner and timing.",
+    "Mention goals or development topics only if they were discussed.",
+    "Keep it factual: never add information that is not in the transcript, and omit a section when nothing applies."
+  ],
+  "sections": [
+    "Topics",
+    "Feedback",
+    "Support Needed",
+    "Follow-ups"
+  ],
+  "example": "## Topics\n- Workload on the migration\n\n## Follow-ups\n- [ ] Review the team plan (manager, next week)"
+}

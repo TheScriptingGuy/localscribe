@@ -1,0 +1,34 @@
+{
+  "id": "doctor_visit",
+  "name": "Appointment Notes",
+  "description": "What the doctor or adviser said: findings, advice, prescriptions and next appointment.",
+  "verbatim": false,
+  "source": "Original LocalScribe template.",
+  "category": "personal",
+  "icon": "health",
+  "tags": [
+    "doctor",
+    "health",
+    "appointment",
+    "medical",
+    "advice",
+    "consultation",
+    "lawyer"
+  ],
+  "outline": [
+    "Summarize why the appointment took place and the main findings or advice, in plain language.",
+    "List instructions exactly as given: medication, dose, timing, lifestyle advice, tests.",
+    "Note follow-up appointments and any deadline or date mentioned.",
+    "List the questions the person still wants to ask.",
+    "This is a personal record of what was said; do not add medical advice of your own.",
+    "Keep it factual: never add information that is not in the transcript, and omit a section when nothing applies."
+  ],
+  "sections": [
+    "Reason",
+    "Findings & Advice",
+    "Instructions",
+    "Follow-up",
+    "Questions"
+  ],
+  "example": "## Instructions\n- Take one tablet each morning with food\n\n## Follow-up\n- Blood test in two weeks"
+}

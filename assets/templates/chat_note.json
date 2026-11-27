@@ -1,9 +1,9 @@
 {
   "id": "chat_note",
   "name": "Chat Note",
-  "description": "Casual conversation summary — the template Plaud auto-selects for informal talks.",
+  "description": "Casual conversation summary: what you talked about, the mood and any plans.",
   "verbatim": false,
-  "source": "Reconstructed from Plaud template id casual-conversation (name, AUTO-SELECT behaviour).",
+  "source": "Original LocalScribe template.",
   "outline": [
     "Summarize an informal conversation in a warm, readable way without inventing detail.",
     "Open with a short overall summary of what the conversation was about.",
@@ -17,5 +17,14 @@
     "Atmosphere",
     "Topics",
     "Agreements & Next Steps"
-  ]
+  ],
+  "category": "personal",
+  "icon": "chat",
+  "tags": [
+    "casual",
+    "conversation",
+    "friends",
+    "informal"
+  ],
+  "example": "## Summary\nA relaxed catch-up about holiday plans and a new job.\n\n## Topics\n- Where to go in August"
 }

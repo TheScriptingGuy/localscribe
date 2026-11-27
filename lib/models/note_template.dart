@@ -21,6 +21,18 @@ class NoteTemplate {
   /// True for user-created templates (stored locally, editable).
   final bool custom;
 
+  /// One of [templateCategoryIds]; groups the template in the browser.
+  final String category;
+
+  /// Key into the icon table in `ui/template_style.dart`.
+  final String icon;
+
+  /// Extra search terms ("standup", "scrum", ...).
+  final List<String> tags;
+
+  /// A short sample of what the finished note looks like (preview text).
+  final String example;
+
   const NoteTemplate({
     required this.id,
     required this.name,
@@ -30,6 +42,10 @@ class NoteTemplate {
     this.verbatim = false,
     this.source = '',
     this.custom = false,
+    this.category = 'general',
+    this.icon = 'description',
+    this.tags = const [],
+    this.example = '',
   });
 
   factory NoteTemplate.fromJson(Map<String, dynamic> j, {bool custom = false}) =>
@@ -46,6 +62,10 @@ class NoteTemplate {
             .map((e) => e.toString())
             .toList(),
         custom: custom,
+        category: (j['category'] ?? 'general') as String,
+        icon: (j['icon'] ?? 'description') as String,
+        tags: (j['tags'] as List? ?? const []).map((e) => e.toString()).toList(),
+        example: (j['example'] ?? '') as String,
       );
 
   Map<String, dynamic> toJson() => {
@@ -56,6 +76,10 @@ class NoteTemplate {
         'source': source,
         'outline': outline,
         'sections': sections,
+        'category': category,
+        'icon': icon,
+        'tags': tags,
+        'example': example,
       };
 
   NoteTemplate copyWith({
@@ -63,6 +87,10 @@ class NoteTemplate {
     String? description,
     List<String>? outline,
     List<String>? sections,
+    String? category,
+    String? icon,
+    List<String>? tags,
+    String? example,
   }) =>
       NoteTemplate(
         id: id,
@@ -73,5 +101,20 @@ class NoteTemplate {
         verbatim: verbatim,
         source: source,
         custom: custom,
+        category: category ?? this.category,
+        icon: icon ?? this.icon,
+        tags: tags ?? this.tags,
+        example: example ?? this.example,
       );
 }
+
+/// Template categories, in display order.
+const templateCategoryIds = [
+  'general',
+  'meeting',
+  'call',
+  'education',
+  'interview',
+  'personal',
+  'work',
+];

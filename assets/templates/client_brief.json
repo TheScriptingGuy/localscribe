@@ -1,0 +1,34 @@
+{
+  "id": "client_brief",
+  "name": "Client Brief",
+  "description": "A client conversation turned into a clear brief: goals, requirements, budget and deadlines.",
+  "verbatim": false,
+  "source": "Original LocalScribe template.",
+  "category": "work",
+  "icon": "briefcase",
+  "tags": [
+    "client",
+    "brief",
+    "requirements",
+    "scope",
+    "freelance",
+    "agency",
+    "customer"
+  ],
+  "outline": [
+    "State who the client is and what they want to achieve.",
+    "List the requirements and deliverables that were named, as precise bullets.",
+    "Capture constraints: budget, deadline, tools, brand rules, approvals.",
+    "List assumptions that were made and questions that still need an answer from the client.",
+    "End with agreed next steps and who does what.",
+    "Keep it factual: never add information that is not in the transcript, and omit a section when nothing applies."
+  ],
+  "sections": [
+    "Client & Goal",
+    "Requirements",
+    "Constraints",
+    "Open Questions",
+    "Next Steps"
+  ],
+  "example": "## Requirements\n- Landing page in Dutch and English\n\n## Constraints\n- Budget: 4,000 euro, live by 1 June"
+}

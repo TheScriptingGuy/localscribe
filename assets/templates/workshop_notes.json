@@ -1,0 +1,32 @@
+{
+  "id": "workshop_notes",
+  "name": "Workshop & Seminar",
+  "description": "Takeaways, techniques and action points from a workshop, seminar or talk.",
+  "verbatim": false,
+  "source": "Original LocalScribe template.",
+  "category": "education",
+  "icon": "book",
+  "tags": [
+    "workshop",
+    "seminar",
+    "talk",
+    "conference",
+    "training",
+    "webinar"
+  ],
+  "outline": [
+    "Name the speaker and topic if they were mentioned.",
+    "Summarize each part of the session under its own heading, in order.",
+    "List concrete techniques, tools and recommendations that were given.",
+    "Capture notable quotes or numbers exactly.",
+    "End with the points the attendee should act on or look up afterwards.",
+    "Keep it factual: never add information that is not in the transcript, and omit a section when nothing applies."
+  ],
+  "sections": [
+    "Session",
+    "Techniques & Tools",
+    "Quotes & Numbers",
+    "To Follow Up"
+  ],
+  "example": "## Techniques & Tools\n- Time-box meetings to 25 minutes\n\n## To Follow Up\n- Look up the speaker's book"
+}

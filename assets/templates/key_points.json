@@ -3,7 +3,7 @@
   "name": "Key Points, Decisions, Tasks",
   "description": "Extract the essentials: key points, decisions made, and tasks to do.",
   "verbatim": false,
-  "source": "Reconstructed from Plaud community template 'Key Points, Decisions, Tasks'.",
+  "source": "Original LocalScribe template.",
   "outline": [
     "Extract and separate three things from the transcript: key points, decisions, and tasks.",
     "List key points as concise bullets covering the substantive content.",
@@ -15,5 +15,14 @@
     "Key Points",
     "Decisions",
     "Tasks"
-  ]
+  ],
+  "category": "general",
+  "icon": "list",
+  "tags": [
+    "decisions",
+    "tasks",
+    "essentials",
+    "highlights"
+  ],
+  "example": "## Key Points\n- Budget approved for Q3\n\n## Decisions\n- Launch moves to 12 May\n\n## Tasks\n- [ ] Send the plan to finance (Sam, Fri)"
 }

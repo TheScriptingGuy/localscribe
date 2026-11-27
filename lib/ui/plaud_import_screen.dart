@@ -1,16 +1,11 @@
-import 'dart:io';
-
 import 'package:flutter/material.dart';
-import 'package:path/path.dart' as p;
-import 'package:path_provider/path_provider.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:provider/provider.dart';
 
-import '../models/recording.dart';
-import '../services/ble/plaud_container.dart';
 import '../services/ble/plaud_credentials.dart';
 import '../services/ble/plaud_crypto.dart';
 import '../services/ble/plaud_device.dart';
+import '../services/ble/plaud_import.dart';
 import '../services/library/recording_store.dart';
 import 'plaud_devices_screen.dart';
 import 'theme.dart';
@@ -29,6 +24,7 @@ class PlaudImportScreen extends StatefulWidget {
 class _PlaudImportScreenState extends State<PlaudImportScreen> {
   final _session = PlaudDeviceSession();
   bool _running = false;
+  bool _fast = true;
   int _saved = 0;
 
   @override
@@ -42,6 +38,7 @@ class _PlaudImportScreenState extends State<PlaudImportScreen> {
       Permission.bluetoothScan,
       Permission.bluetoothConnect,
       Permission.locationWhenInUse,
+      if (_fast) Permission.nearbyWifiDevices,
     ].request();
     // On Android 12+ the bluetooth* perms matter; on older, location does.
     return res[Permission.bluetoothScan]?.isGranted != false &&
@@ -61,37 +58,22 @@ class _PlaudImportScreenState extends State<PlaudImportScreen> {
       _running = true;
       _saved = 0;
     });
-    await _session.sync(cred, dev);
-    if (!mounted) return;
-    // Persist whatever came down.
     final store = context.read<RecordingStore>();
-    final tmp = await getTemporaryDirectory();
+    final have = {
+      for (final r in store.all)
+        if (r.deviceFileId != null) r.deviceFileId!,
+    };
+    await _session.sync(cred, dev, skip: have, fast: _fast);
+    if (!mounted) return;
+    // Persist whatever came down: unmask the Opus, wrap it in Ogg so the
+    // normal decode -> transcribe path works, and keep the recorder's
+    // highlight marks.
     final pem = cred.rsaPrivateKeyPem;
     final priv = (pem == null || pem.isEmpty)
         ? null
         : PlaudCrypto.privateKeyFromPem(pem);
     for (final d in _session.downloads) {
-      final stem = 'plaud_${d.fileId.toRadixString(16)}';
-      // The container is Opus masked with a ChaCha20 keystream; unmask it and
-      // wrap the packets in Ogg so the normal decode → transcribe path works.
-      File f;
-      try {
-        if (priv == null) throw StateError('no RSA key loaded');
-        f = File(p.join(tmp.path, '$stem.opus'));
-        await f.writeAsBytes(
-            PlaudContainer(d.bytes).toOggOpus(priv), flush: true);
-      } catch (e) {
-        // Keep the raw container rather than losing the recording.
-        debugPrint('plaud: container decode failed for $stem: $e');
-        f = File(p.join(tmp.path, '$stem.plaud'));
-        await f.writeAsBytes(d.bytes, flush: true);
-      }
-      await store.add(
-        f,
-        title: 'Plaud Note ${d.fileId.toRadixString(16)}',
-        source: RecordingSource.plaud,
-        move: true,
-      );
+      await addPlaudRecording(store, priv, d);
       _saved++;
     }
     if (!mounted) return;
@@ -123,12 +105,13 @@ class _PlaudImportScreenState extends State<PlaudImportScreen> {
         child: Padding(
           padding: const EdgeInsets.all(24),
           child: Column(mainAxisSize: MainAxisSize.min, children: [
-            const Icon(Icons.cloud_off_outlined, size: 48, color: Palette.muted),
+            Icon(Icons.cloud_off_outlined,
+                size: 48, color: context.colors.muted),
             const SizedBox(height: 16),
-            const Text(
+            Text(
               'Sign in to Plaud first to connect to your recorder.',
               textAlign: TextAlign.center,
-              style: TextStyle(color: Palette.muted),
+              style: TextStyle(color: context.colors.muted),
             ),
             const SizedBox(height: 16),
             FilledButton(
@@ -146,8 +129,9 @@ class _PlaudImportScreenState extends State<PlaudImportScreen> {
             : null) ??
         (cred.devices.isNotEmpty ? cred.devices.first : null);
     if (dev == null) {
-      return const Center(
-          child: Text('No paired device.', style: TextStyle(color: Palette.muted)));
+      return Center(
+          child: Text('No paired device.',
+              style: TextStyle(color: context.colors.muted)));
     }
     return AnimatedBuilder(
       animation: _session,
@@ -161,6 +145,15 @@ class _PlaudImportScreenState extends State<PlaudImportScreen> {
               title: Text(dev.name),
               subtitle: Text('serial ${dev.serial}'),
             ),
+            SwitchListTile(
+              contentPadding: EdgeInsets.zero,
+              title: const Text('Fast transfer over WiFi'),
+              subtitle: const Text('The recorder opens its own WiFi network; '
+                  'the phone joins it for the download. Falls back to '
+                  'Bluetooth if that fails.'),
+              value: _fast,
+              onChanged: _running ? null : (v) => setState(() => _fast = v),
+            ),
             const SizedBox(height: 8),
             FilledButton.icon(
               onPressed: _running ? null : () => _sync(cred, dev),
@@ -173,7 +166,7 @@ class _PlaudImportScreenState extends State<PlaudImportScreen> {
                   style: const TextStyle(fontWeight: FontWeight.w700)),
               const SizedBox(width: 8),
               Expanded(child: Text(_session.message,
-                  style: const TextStyle(color: Palette.muted))),
+                  style: TextStyle(color: context.colors.muted))),
             ]),
             if (_session.status == PlaudStatus.syncing && _session.progress > 0)
               Padding(
@@ -191,7 +184,7 @@ class _PlaudImportScreenState extends State<PlaudImportScreen> {
             Container(
               padding: const EdgeInsets.all(10),
               decoration: BoxDecoration(
-                color: Palette.fill,
+                color: context.colors.fill,
                 borderRadius: BorderRadius.circular(8),
               ),
               child: SelectableText(
@@ -212,6 +205,8 @@ class _PlaudImportScreenState extends State<PlaudImportScreen> {
         PlaudStatus.connecting => 'Connecting',
         PlaudStatus.handshaking => 'Handshake',
         PlaudStatus.syncing => 'Syncing',
+        PlaudStatus.recording => 'Recording',
+        PlaudStatus.stopping => 'Stopping',
         PlaudStatus.done => 'Done',
         PlaudStatus.error => 'Error',
       };

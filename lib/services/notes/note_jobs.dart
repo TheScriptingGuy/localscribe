@@ -11,7 +11,9 @@ import '../models/llm_models.dart';
 import '../templates/prompt_builder.dart';
 import '../templates/template_repository.dart';
 import 'auto_template.dart';
+import 'highlights.dart';
 import 'note_generator.dart';
+import 'note_title.dart';
 
 class _NoteJob {
   double? progress; // null until the generator reports any
@@ -87,11 +89,16 @@ class NoteJobs extends ChangeNotifier {
             .catchError((_) {});
       }
       final gen = AiFactory.noteGenerator(settings.noteAi, models: llmModels);
-      final auto = choice == autoTemplate;
-      final template = auto
-          ? await AutoTemplatePicker.pick(
-              generator: gen, templates: templates.all, transcript: transcript)
-          : templates.byId(choice);
+      // "Set for next use" replaces Auto when the user chose a default.
+      final fallback = choice == autoTemplate ? templates.defaultTemplate : null;
+      final auto = choice == autoTemplate && fallback == null;
+      final template = fallback ??
+          (auto
+              ? await AutoTemplatePicker.pick(
+                  generator: gen,
+                  templates: templates.all,
+                  transcript: transcript)
+              : templates.byId(choice));
       if (template == null) throw AiException('Template not found: $choice');
 
       final content = await gen.complete(
@@ -99,6 +106,7 @@ class NoteJobs extends ChangeNotifier {
           template: template,
           transcript: transcript,
           languageHint: settings.noteLanguage,
+          highlights: highlightsContext(rec),
         ),
         onProgress: report,
         cancel: job.cancel,
@@ -116,15 +124,14 @@ class NoteJobs extends ChangeNotifier {
           auto: auto,
         ),
       );
-      // Adopt the note's title for recordings that still have a default name.
-      if (rec.title.startsWith('Recording ')) {
-        final heading = RegExp(r'^#\s+(.+)$', multiLine: true)
-            .firstMatch(content)
-            ?.group(1)
-            ?.trim();
-        if (heading != null && heading.isNotEmpty) rec.title = heading;
+      // Like Plaud: name the recording after what it is about, while it still
+      // has a generated name (never overwrite a title the user chose).
+      if (isAutoTitle(rec.title)) {
+        final title = titleFromNote(content);
+        if (title != null) rec.title = title;
       }
       await store.save(rec);
+      await templates.markUsed(template.id);
     } on AiException catch (e) {
       if (!e.cancelled) _errors[rec.id] = e.message;
     } catch (e) {

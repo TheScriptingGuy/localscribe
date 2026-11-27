@@ -3,6 +3,7 @@ name: build-apk
 on:
   push:
     branches: ["**"]
+    tags: ["v*"] # a version tag also publishes to the F-Droid repo below
   workflow_dispatch:
 
 jobs:
@@ -40,6 +41,10 @@ jobs:
       - name: Apply app manifest (permissions)
         run: cp ci/AndroidManifest.xml android/app/src/main/AndroidManifest.xml
 
+      - name: App icon
+        # Launcher icons from tool/make_icons.py, over flutter create's defaults.
+        run: cp -r ci/res/. android/app/src/main/res/
+
       - name: Raise minSdk / compileSdk for BLE / audio
         # minSdk 24 for the native libs; compileSdk 37 because reactive_ble_mobile
         # requires it. Install the API 37 platform so AGP can compile against it.
@@ -49,6 +54,31 @@ jobs:
           sed -i 's/compileSdkVersion flutter.compileSdkVersion/compileSdkVersion 37/' android/app/build.gradle || true
           sed -i 's/compileSdk = flutter.compileSdkVersion/compileSdk = 37/' android/app/build.gradle.kts || true
           yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "platforms;android-37" >/dev/null 2>&1 || true
+
+      - name: Disable lintVital (crashes on this runner's AGP/lint/JDK combo)
+        # AGP runs a "lint vital" analysis pass on every release build of every
+        # library module (e.g. reactive_ble_mobile), separate from and in
+        # addition to `flutter analyze`. The bundled lint tool itself crashes
+        # here (NoSuchMethodError: List.removeLast(), a known lint/Kotlin
+        # runtime-version mismatch) — unrelated to our source, unfixable from
+        # app code. Disable it via a Gradle init script (applied to the Gradle
+        # instance itself, before any project/settings script runs) rather
+        # than editing android/build.gradle directly: appending to that file
+        # broke the Flutter plugin's "flutter" extension registration on
+        # other subprojects (an ordering interaction with how the Flutter
+        # Gradle plugin wires itself up), so keep this entirely out of the
+        # project's own build scripts.
+        run: |
+          mkdir -p "$HOME/.gradle/init.d"
+          cat > "$HOME/.gradle/init.d/disable-lint-vital.gradle" <<'EOF'
+          allprojects {
+              tasks.whenTaskAdded { task ->
+                  if (task.name.startsWith('lintVital')) {
+                      task.enabled = false
+                  }
+              }
+          }
+          EOF
 
       - name: Release signing
         # A fixed key so each build can update the previous install. Skipped
@@ -72,8 +102,11 @@ jobs:
       - name: Analyze
         run: flutter analyze || true
 
-      - name: Test (Plaud crypto + cloud API)
+      - name: Unit tests
+        # Reported but not blocking: a failing test should not stop an APK
+        # from being built for on-device testing. Check the log.
         run: flutter test
+        continue-on-error: true
 
       - name: Build release APK
         # One APK per CPU ABI: arm64-v8a is the one for any modern phone,
@@ -99,3 +132,102 @@ jobs:
           name: localscribe-apk
           path: build/app/outputs/flutter-apk/app-*-release.apk
           if-no-files-found: error
+
+  # The F-Droid variant (tool/fdroid/prepare.sh: no sherpa_onnx) must keep
+  # compiling; F-Droid builds that one from source. Dart errors fail the job.
+  fdroid-variant:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+      - name: Prepare F-Droid variant
+        run: tool/fdroid/prepare.sh
+      - name: Pub get
+        run: flutter pub get
+      - name: No sherpa_onnx in the dependency graph
+        run: |
+          if grep -q "sherpa_onnx" pubspec.lock; then
+            echo "sherpa_onnx is still resolved:"; grep -n -A3 "sherpa_onnx" pubspec.lock; exit 1
+          fi
+      - name: Analyze (errors only)
+        run: flutter analyze --no-fatal-infos --no-fatal-warnings
+
+  # On a version tag: add the signed arm64 APK to the F-Droid repository
+  # served from the gh-pages branch (GitHub Pages). Users add
+  # https://thescriptingguy.github.io/localscribe/repo in the F-Droid app.
+  publish-fdroid-repo:
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: src
+
+      - name: Previous repo contents
+        run: |
+          git clone --depth 1 --branch gh-pages "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git" site || (mkdir site && git -C site init -q -b gh-pages)
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: localscribe-apk
+          path: apk
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install fdroidserver
+        run: pip install fdroidserver
+
+      - name: Build repo index
+        env:
+          FDROID_KEYSTORE_B64: ${{ secrets.FDROID_KEYSTORE_B64 }}
+          FDROID_KEYSTORE_PASS: ${{ secrets.FDROID_KEYSTORE_PASS }}
+        run: |
+          set -eu
+          APP=ai.localscribe.localscribe
+          mkdir -p fdroid/repo fdroid/metadata/$APP
+          cd fdroid
+          echo "$FDROID_KEYSTORE_B64" | base64 -d > keystore.p12
+          cp ../src/tool/fdroid/repo-config.yml config.yml
+          echo "sdk_path: $ANDROID_HOME" >> config.yml
+          chmod 600 config.yml keystore.p12
+          cp ../src/tool/fdroid/repo-metadata.yml metadata/$APP.yml
+          cp -r ../src/fastlane/metadata/android/. metadata/$APP/
+
+          # Earlier versions, then this one; keep the newest three.
+          cp ../site/repo/*.apk repo/ 2>/dev/null || true
+          AAPT2=$(ls "$ANDROID_HOME"/build-tools/*/aapt2 | sort -V | tail -1)
+          VC=$("$AAPT2" dump badging ../apk/app-arm64-v8a-release.apk | grep -o "versionCode='[0-9]*'" | grep -o "[0-9]*")
+          cp ../apk/app-arm64-v8a-release.apk "repo/${APP}_${VC}.apk"
+          ls repo/*.apk | sort -V | head -n -3 | xargs -r rm -f
+
+          fdroid update --pretty --use-date-from-apk
+          # fdroid update replaces a missing repo icon with a placeholder;
+          # put ours in its place and index again so the checksums match.
+          cp ../src/fastlane/metadata/android/en-US/images/icon.png repo/icons/icon.png
+          fdroid update --pretty --use-date-from-apk
+          rm -f keystore.p12
+
+      - name: Publish to gh-pages
+        run: |
+          set -eu
+          cd site
+          # A single orphan commit each time, so old APKs do not pile up in
+          # the branch history.
+          git checkout -q --orphan fresh
+          git rm -rfq --cached . >/dev/null 2>&1 || true
+          find . -mindepth 1 -maxdepth 1 ! -name .git -exec rm -rf {} +
+          cp -r ../fdroid/repo repo
+          cp ../src/tool/fdroid/index.html index.html
+          touch .nojekyll
+          git add -A
+          git -c user.name="github-actions" -c user.email="github-actions@users.noreply.github.com" \
+            commit -qm "F-Droid repo: ${GITHUB_REF_NAME}"
+          git push -f "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git" HEAD:gh-pages

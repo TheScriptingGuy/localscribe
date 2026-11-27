@@ -48,7 +48,16 @@ class RecordingStore extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// Whether a recording with this Plaud recorder file id is already here.
+  bool hasDeviceFile(int fileId) =>
+      _items.any((r) => r.deviceFileId == fileId);
+
   File audioOf(Recording r) => File(p.join(_root.path, r.id, r.audioFile));
+
+  /// The photo attached to [m], or null for markers without one.
+  File? photoOf(Recording r, RecordingMarker m) => m.photoFile == null
+      ? null
+      : File(p.join(_root.path, r.id, m.photoFile!));
 
   /// A scratch path for the recorder to write into before the recording is
   /// added to the library.
@@ -65,6 +74,10 @@ class RecordingStore extends ChangeNotifier {
     required RecordingSource source,
     int durationMs = 0,
     bool move = false,
+    List<RecordingMarker> markers = const [],
+    Map<String, File> photos = const {},
+    DateTime? createdAt,
+    int? deviceFileId,
   }) async {
     final id = _uuid.v4();
     final dir = Directory(p.join(_root.path, id));
@@ -85,13 +98,35 @@ class RecordingStore extends ChangeNotifier {
       await audio.copy(dest);
     }
 
+    // Photos taken while recording live in <recording>/photos/<markerId>.jpg.
+    final saved = <RecordingMarker>[];
+    for (final m in markers) {
+      final photo = photos[m.id];
+      if (photo == null) {
+        saved.add(m);
+        continue;
+      }
+      final rel = 'photos/${m.id}.jpg';
+      final target = File(p.join(dir.path, rel));
+      await target.parent.create(recursive: true);
+      try {
+        await photo.rename(target.path);
+      } on FileSystemException {
+        await photo.copy(target.path);
+        await photo.delete();
+      }
+      saved.add(m.withPhotoFile(rel));
+    }
+
     final rec = Recording(
       id: id,
       title: title,
-      createdAt: DateTime.now(),
+      createdAt: createdAt ?? DateTime.now(),
       audioFile: name,
       durationMs: durationMs,
       source: source,
+      markers: saved,
+      deviceFileId: deviceFileId,
     );
     await _write(rec);
     _items.add(rec);

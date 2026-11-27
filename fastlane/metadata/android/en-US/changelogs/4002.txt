@@ -1,0 +1,1 @@
+First release: recording, on-device transcription, speaker recognition, AI notes from templates, highlights, export, Plaud Note recorder sync and recording.

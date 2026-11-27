@@ -13,6 +13,7 @@ import 'services/notes/note_jobs.dart';
 import 'services/templates/template_repository.dart';
 import 'services/transcription/transcription_jobs.dart';
 import 'settings/settings.dart';
+import 'ui/device_record_screen.dart';
 import 'ui/plaud_devices_screen.dart';
 import 'ui/record_screen.dart';
 import 'ui/recordings_screen.dart';
@@ -115,7 +116,7 @@ class LocalScribeApp extends StatelessWidget {
     return MultiProvider(
       providers: [
         ChangeNotifierProvider.value(value: settings),
-        Provider.value(value: templates),
+        ChangeNotifierProvider.value(value: templates),
         ChangeNotifierProvider.value(value: recordings),
         ChangeNotifierProvider.value(value: models),
         ChangeNotifierProvider.value(value: speakerModels),
@@ -124,12 +125,15 @@ class LocalScribeApp extends StatelessWidget {
         ChangeNotifierProvider.value(value: jobs),
         ChangeNotifierProvider.value(value: noteJobs),
       ],
-      child: MaterialApp(
-        title: 'LocalScribe',
-        debugShowCheckedModeBanner: false,
-        theme: buildTheme(),
-        themeMode: ThemeMode.light,
-        home: const RootShell(),
+      child: Consumer<Settings>(
+        builder: (context, s, _) => MaterialApp(
+          title: 'LocalScribe',
+          debugShowCheckedModeBanner: false,
+          theme: buildTheme(Brightness.light),
+          darkTheme: buildTheme(Brightness.dark),
+          themeMode: s.themeMode,
+          home: const RootShell(),
+        ),
       ),
     );
   }
@@ -148,6 +152,8 @@ class _RootShellState extends State<RootShell> {
   static const _pages = [RecordingsScreen(), TemplatesScreen()];
 
   Future<void> _newRecording() async {
+    final cred = context.read<PlaudCredentials>();
+    final recorders = cred.isConfigured ? cred.devices : const <PlaudDeviceCred>[];
     final choice = await showModalBottomSheet<String>(
       context: context,
       showDragHandle: true,
@@ -163,6 +169,15 @@ class _RootShellState extends State<RootShell> {
                 subtitle: 'Capture with the phone microphone',
                 onTap: () => Navigator.pop(ctx, 'record'),
               ),
+              if (recorders.isNotEmpty)
+                _SheetAction(
+                  icon: Icons.settings_remote_outlined,
+                  title: recorders.length == 1
+                      ? 'Record on ${recorders.first.name}'
+                      : 'Record on Plaud',
+                  subtitle: 'Start your Plaud recorder from here, with highlights',
+                  onTap: () => Navigator.pop(ctx, 'device'),
+                ),
               _SheetAction(
                 icon: Icons.upload_file_outlined,
                 title: 'Import audio',
@@ -181,6 +196,16 @@ class _RootShellState extends State<RootShell> {
       ),
     );
     if (!mounted) return;
+    if (choice == 'device') {
+      final dev = recorders.length == 1
+          ? recorders.first
+          : await _pickRecorder(recorders);
+      if (dev != null && mounted) {
+        Navigator.of(context).push(MaterialPageRoute(
+            builder: (_) => DeviceRecordScreen(device: dev)));
+      }
+      return;
+    }
     switch (choice) {
       case 'record':
         Navigator.of(context)
@@ -193,6 +218,36 @@ class _RootShellState extends State<RootShell> {
     }
   }
 
+  /// Which recorder to record on, when more than one is paired.
+  Future<PlaudDeviceCred?> _pickRecorder(List<PlaudDeviceCred> recorders) =>
+      showModalBottomSheet<PlaudDeviceCred>(
+        context: context,
+        showDragHandle: true,
+        builder: (ctx) => SafeArea(
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(8, 0, 8, 16),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+                  child: Text('Which recorder?',
+                      style: Theme.of(ctx).textTheme.titleLarge),
+                ),
+                for (final d in recorders)
+                  _SheetAction(
+                    icon: Icons.settings_remote_outlined,
+                    title: d.name,
+                    subtitle: 'Serial ${d.serial}',
+                    onTap: () => Navigator.pop(ctx, d),
+                  ),
+              ],
+            ),
+          ),
+        ),
+      );
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -200,7 +255,7 @@ class _RootShellState extends State<RootShell> {
       floatingActionButtonLocation: FloatingActionButtonLocation.centerDocked,
       floatingActionButton: _NewButton(onPressed: _newRecording),
       bottomNavigationBar: BottomAppBar(
-        color: Palette.surface,
+        color: context.colors.surface,
         surfaceTintColor: Colors.transparent,
         elevation: 0,
         height: 64,
@@ -241,16 +296,16 @@ class _NewButton extends StatelessWidget {
     return Tooltip(
       message: 'New recording',
       child: Material(
-        color: Palette.text,
-        shape: const CircleBorder(
-            side: BorderSide(color: Palette.surface, width: 5)),
+        color: context.colors.text,
+        shape: CircleBorder(
+            side: BorderSide(color: context.colors.surface, width: 5)),
         clipBehavior: Clip.antiAlias,
         child: InkWell(
           onTap: onPressed,
-          child: const SizedBox(
+          child: SizedBox(
             width: 72,
             height: 72,
-            child: Icon(Icons.add, color: Colors.white, size: 34),
+            child: Icon(Icons.add, color: context.colors.inverse, size: 34),
           ),
         ),
       ),
@@ -276,8 +331,8 @@ class _SheetAction extends StatelessWidget {
       contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
       leading: CircleAvatar(
         radius: 24,
-        backgroundColor: Palette.fill,
-        foregroundColor: Palette.text,
+        backgroundColor: context.colors.fill,
+        foregroundColor: context.colors.text,
         child: Icon(icon),
       ),
       title: Text(title,

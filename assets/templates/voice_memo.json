@@ -1,0 +1,30 @@
+{
+  "id": "voice_memo",
+  "name": "Voice Memo to Tasks",
+  "description": "Messy thinking out loud, cleaned up into a short summary plus a task list.",
+  "verbatim": false,
+  "source": "Original LocalScribe template.",
+  "category": "personal",
+  "icon": "mic",
+  "tags": [
+    "voice memo",
+    "thoughts",
+    "ideas",
+    "reminders",
+    "tasks",
+    "brain dump"
+  ],
+  "outline": [
+    "Write a two or three sentence clean summary of what the speaker was thinking about.",
+    "Extract every task, reminder or intention as a '- [ ] ' checkbox line, rewritten to start with a verb.",
+    "Collect ideas that are not tasks in a separate list.",
+    "Drop filler words, repetition and false starts.",
+    "Keep the speaker's own words for names, places and numbers."
+  ],
+  "sections": [
+    "Summary",
+    "Tasks",
+    "Ideas"
+  ],
+  "example": "## Tasks\n- [ ] Call the plumber about the leak\n- [ ] Renew the car insurance"
+}

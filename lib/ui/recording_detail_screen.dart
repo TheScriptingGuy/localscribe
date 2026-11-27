@@ -10,12 +10,15 @@ import '../services/library/recording_store.dart';
 import '../services/models/llm_models.dart';
 import '../services/notes/note_jobs.dart';
 import '../services/templates/prompt_builder.dart';
-import '../services/templates/template_repository.dart';
 import '../services/transcription/transcription_jobs.dart';
 import '../services/transcription/transcriber.dart' show CancelSignal;
 import '../settings/settings.dart';
+import '../services/export/transcript_paragraphs.dart';
+import 'detail/marker_list.dart';
+import 'detail/share_sheet.dart';
 import 'format.dart';
 import 'markdown_view.dart';
+import 'template_picker.dart';
 import 'theme.dart';
 
 /// One recording: playback, transcript, generated notes and Ask-AI chat.
@@ -33,6 +36,10 @@ class _RecordingDetailScreenState extends State<RecordingDetailScreen> {
 
   /// Which generated note the Notes tab shows (index into rec.notes).
   int _noteIndex = 0;
+
+  /// Notes shows the Highlights view instead of a generated note; null =
+  /// automatic (Highlights until a note has been generated).
+  bool? _showHighlights;
 
   @override
   void initState() {
@@ -61,6 +68,7 @@ class _RecordingDetailScreenState extends State<RecordingDetailScreen> {
     setState(() {
       _error = null;
       _noteIndex = 0; // the new note goes first
+      _showHighlights = false;
     });
     context.read<NoteJobs>().generate(rec, choice);
   }
@@ -107,8 +115,8 @@ class _RecordingDetailScreenState extends State<RecordingDetailScreen> {
             ),
             if (others.isNotEmpty) ...[
               const SizedBox(height: 16),
-              const Text('Or the same person as:',
-                  style: TextStyle(color: Palette.muted)),
+              Text('Or the same person as:',
+                  style: TextStyle(color: context.colors.muted)),
               const SizedBox(height: 8),
               Wrap(
                 spacing: 8,
@@ -194,32 +202,7 @@ class _RecordingDetailScreenState extends State<RecordingDetailScreen> {
   }
 
   Future<void> _pickTemplate(Recording rec) async {
-    final templates = context.read<TemplateRepository>();
-    final choice = await showModalBottomSheet<String>(
-      context: context,
-      showDragHandle: true,
-      builder: (ctx) => SafeArea(
-        child: ListView(
-          shrinkWrap: true,
-          children: [
-            ListTile(
-              leading: const Icon(Icons.auto_awesome),
-              title: const Text('Auto'),
-              subtitle: const Text('Let the AI pick the best template'),
-              onTap: () => Navigator.pop(ctx, NoteJobs.autoTemplate),
-            ),
-            const Divider(),
-            ...templates.all.map((t) => ListTile(
-                  leading: const Icon(Icons.description_outlined),
-                  title: Text(t.name),
-                  subtitle: Text(t.description,
-                      maxLines: 1, overflow: TextOverflow.ellipsis),
-                  onTap: () => Navigator.pop(ctx, t.id),
-                )),
-          ],
-        ),
-      ),
-    );
+    final choice = await pickTemplate(context);
     if (choice != null && mounted) _generate(rec, choice);
   }
 
@@ -247,14 +230,18 @@ class _RecordingDetailScreenState extends State<RecordingDetailScreen> {
             tabs: [Tab(text: 'Transcript'), Tab(text: 'Notes')],
           ),
           actions: [
+            IconButton(
+              tooltip: 'Share & export',
+              icon: const Icon(Icons.ios_share),
+              onPressed: () =>
+                  showShareSheet(context, rec, noteIndex: _noteIndex),
+            ),
             PopupMenuButton<String>(
               icon: const Icon(Icons.more_horiz),
               onSelected: (v) {
                 switch (v) {
                   case 'rename':
                     _rename(rec);
-                  case 'copy':
-                    _copy(transcript?.text ?? '', 'Transcript');
                   case 'retranscribe':
                     _transcribe(rec);
                   case 'speakers':
@@ -266,9 +253,6 @@ class _RecordingDetailScreenState extends State<RecordingDetailScreen> {
               },
               itemBuilder: (_) => [
                 const PopupMenuItem(value: 'rename', child: Text('Rename')),
-                if (transcript != null)
-                  const PopupMenuItem(
-                      value: 'copy', child: Text('Copy transcript')),
                 if (transcript != null && !jobs.isRunning(rec.id)) ...[
                   const PopupMenuItem(
                       value: 'retranscribe', child: Text('Transcribe again')),
@@ -375,7 +359,7 @@ class _RecordingDetailScreenState extends State<RecordingDetailScreen> {
             if (language != null && language.isNotEmpty)
               language.toUpperCase(),
           ].join('  |  '),
-          style: const TextStyle(color: Palette.muted, fontSize: 15),
+          style: TextStyle(color: context.colors.muted, fontSize: 15),
         ),
         const SizedBox(height: 20),
         const Divider(height: 1),
@@ -391,34 +375,12 @@ class _RecordingDetailScreenState extends State<RecordingDetailScreen> {
   /// changes, on a pause of 2 s+, or once a paragraph is long and the last
   /// segment ends a sentence.
   static List<List<TranscriptSegment>> _paragraphs(
-      Recording rec, List<TranscriptSegment> segments) {
-    String? nameOf(TranscriptSegment s) =>
-        s.speaker == null ? null : rec.speakerName(s.speaker!);
-    final out = <List<TranscriptSegment>>[];
-    var current = <TranscriptSegment>[];
-    var chars = 0;
-    for (final s in segments) {
-      if (current.isNotEmpty) {
-        final gap = s.start - current.last.end;
-        final endsSentence =
-            RegExp(r'[.!?…]["”’)]?$').hasMatch(current.last.text.trim());
-        if (nameOf(s) != nameOf(current.last) ||
-            gap >= 2 ||
-            (chars > 280 && endsSentence)) {
-          out.add(current);
-          current = [];
-          chars = 0;
-        }
-      }
-      current.add(s);
-      chars += s.text.length;
-    }
-    if (current.isNotEmpty) out.add(current);
-    return out;
-  }
+          Recording rec, List<TranscriptSegment> segments) =>
+      groupTranscriptParagraphs(rec, segments);
 
   Widget _notesTab(Recording rec, NoteJobs notes) {
-    if (rec.transcript == null) {
+    final hasMarkers = rec.markers.isNotEmpty;
+    if (rec.transcript == null && !hasMarkers) {
       return const _CallToAction(
         text: 'Transcribe the recording first, then generate notes from any '
             'template.',
@@ -435,22 +397,71 @@ class _RecordingDetailScreenState extends State<RecordingDetailScreen> {
             ),
           )
         : null;
-    if (rec.notes.isEmpty) {
-      return progress != null
-          ? ListView(children: [progress])
-          : _CallToAction(
-              text: 'Turn the transcript into a summary, meeting minutes or '
-                  'any other template.',
-              button: FilledButton.icon(
-                onPressed: () => _pickTemplate(rec),
-                icon: const Icon(Icons.auto_awesome, size: 20),
-                label: const Text('Generate note'),
-              ),
-            );
+    final generateCta = _CallToAction(
+      text: 'Turn the transcript into a summary, meeting minutes or '
+          'any other template.',
+      button: FilledButton.icon(
+        onPressed: () => _pickTemplate(rec),
+        icon: const Icon(Icons.auto_awesome, size: 20),
+        label: const Text('Generate note'),
+      ),
+    );
+    if (rec.notes.isEmpty && !hasMarkers) {
+      return progress != null ? ListView(children: [progress]) : generateCta;
     }
 
+    // Like the Plaud app: Highlights | <notes> | +
+    final showHighlights = hasMarkers &&
+        (rec.transcript == null ||
+            (_showHighlights ?? rec.notes.isEmpty));
     final index = _noteIndex < rec.notes.length ? _noteIndex : 0;
-    final note = rec.notes[index];
+    final Widget body;
+    if (showHighlights) {
+      body = Builder(
+        builder: (ctx) => MarkerList(
+          rec: rec,
+          onSeek: (m) {
+            _player.seek(Duration(milliseconds: m.atMs));
+            _player.play();
+            DefaultTabController.of(ctx).animateTo(0);
+          },
+        ),
+      );
+    } else if (rec.notes.isEmpty) {
+      body = progress != null ? const SizedBox.shrink() : generateCta;
+    } else {
+      final note = rec.notes[index];
+      body = ListView(
+        padding: const EdgeInsets.fromLTRB(24, 16, 24, 32),
+        children: [
+          MarkdownView(note.content),
+          const SizedBox(height: 16),
+          const Divider(height: 1),
+          Row(
+            children: [
+              Expanded(
+                child: Text(
+                  (note.auto ? 'Auto · ' : '') +
+                      formatRelativeDate(note.createdAt),
+                  style: TextStyle(color: context.colors.muted),
+                ),
+              ),
+              IconButton(
+                tooltip: 'Copy',
+                icon: const Icon(Icons.copy_outlined, size: 20),
+                onPressed: () => _copy(note.content, 'Note'),
+              ),
+              IconButton(
+                tooltip: 'Delete',
+                icon: const Icon(Icons.delete_outline, size: 20),
+                onPressed: () => _deleteNote(rec, note),
+              ),
+            ],
+          ),
+        ],
+      );
+    }
+
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
@@ -460,69 +471,49 @@ class _RecordingDetailScreenState extends State<RecordingDetailScreen> {
             scrollDirection: Axis.horizontal,
             padding: const EdgeInsets.symmetric(horizontal: 14),
             children: [
+              if (hasMarkers)
+                _NoteTab(
+                  label: 'Highlights',
+                  selected: showHighlights,
+                  onTap: () => setState(() => _showHighlights = true),
+                ),
               for (var i = 0; i < rec.notes.length; i++)
                 _NoteTab(
                   label: rec.notes[i].templateName,
-                  selected: i == index,
-                  onTap: () => setState(() => _noteIndex = i),
+                  selected: !showHighlights && i == index,
+                  onTap: () => setState(() {
+                    _showHighlights = false;
+                    _noteIndex = i;
+                  }),
                 ),
-              Center(
-                child: Material(
-                  color: Palette.fill,
-                  borderRadius: BorderRadius.circular(8),
-                  child: InkWell(
+              if (rec.transcript != null)
+                Center(
+                  child: Material(
+                    color: context.colors.fill,
                     borderRadius: BorderRadius.circular(8),
-                    onTap: generating ? null : () => _pickTemplate(rec),
-                    child: SizedBox(
-                      width: 48,
-                      height: 32,
-                      child: generating
-                          ? const Center(
-                              child: SizedBox(
-                                  width: 16,
-                                  height: 16,
-                                  child: CircularProgressIndicator(
-                                      strokeWidth: 2)))
-                          : const Icon(Icons.add, size: 22),
+                    child: InkWell(
+                      borderRadius: BorderRadius.circular(8),
+                      onTap: generating ? null : () => _pickTemplate(rec),
+                      child: SizedBox(
+                        width: 48,
+                        height: 32,
+                        child: generating
+                            ? const Center(
+                                child: SizedBox(
+                                    width: 16,
+                                    height: 16,
+                                    child: CircularProgressIndicator(
+                                        strokeWidth: 2)))
+                            : const Icon(Icons.add, size: 22),
+                      ),
                     ),
                   ),
                 ),
-              ),
             ],
           ),
         ),
-        if (progress != null) progress,
-        Expanded(
-          child: ListView(
-            padding: const EdgeInsets.fromLTRB(24, 16, 24, 32),
-            children: [
-              MarkdownView(note.content),
-              const SizedBox(height: 16),
-              const Divider(height: 1),
-              Row(
-                children: [
-                  Expanded(
-                    child: Text(
-                      (note.auto ? 'Auto · ' : '') +
-                          formatRelativeDate(note.createdAt),
-                      style: const TextStyle(color: Palette.muted),
-                    ),
-                  ),
-                  IconButton(
-                    tooltip: 'Copy',
-                    icon: const Icon(Icons.copy_outlined, size: 20),
-                    onPressed: () => _copy(note.content, 'Note'),
-                  ),
-                  IconButton(
-                    tooltip: 'Delete',
-                    icon: const Icon(Icons.delete_outline, size: 20),
-                    onPressed: () => _deleteNote(rec, note),
-                  ),
-                ],
-              ),
-            ],
-          ),
-        ),
+        if (progress != null && !showHighlights) progress,
+        Expanded(child: body),
       ],
     );
   }
@@ -547,7 +538,7 @@ class _NoteTab extends StatelessWidget {
             label,
             style: TextStyle(
               fontSize: 17,
-              color: selected ? Palette.text : Palette.muted,
+              color: selected ? context.colors.text : context.colors.muted,
               fontWeight: selected ? FontWeight.w700 : FontWeight.w400,
             ),
           ),
@@ -586,10 +577,10 @@ class _TranscriptParagraph extends StatelessWidget {
               children: [
                 Text(
                   formatSeconds(start),
-                  style: const TextStyle(
-                    color: Palette.muted,
+                  style: TextStyle(
+                    color: context.colors.muted,
                     fontSize: 14,
-                    fontFeatures: [FontFeature.tabularFigures()],
+                    fontFeatures: const [FontFeature.tabularFigures()],
                   ),
                 ),
                 if (name != null) ...[
@@ -633,14 +624,17 @@ class _AskBar extends StatelessWidget {
           child: InkWell(
             onTap: onTap,
             borderRadius: BorderRadius.circular(12),
-            child: const Padding(
-              padding: EdgeInsets.symmetric(horizontal: 18, vertical: 16),
+            child: Padding(
+              padding:
+                  const EdgeInsets.symmetric(horizontal: 18, vertical: 16),
               child: Row(
                 children: [
-                  Icon(Icons.auto_awesome, size: 20, color: Palette.muted),
-                  SizedBox(width: 12),
+                  Icon(Icons.auto_awesome,
+                      size: 20, color: context.colors.muted),
+                  const SizedBox(width: 12),
                   Text('Ask AI about this recording',
-                      style: TextStyle(color: Palette.muted, fontSize: 16)),
+                      style: TextStyle(
+                          color: context.colors.muted, fontSize: 16)),
                 ],
               ),
             ),
@@ -658,11 +652,62 @@ class _PlayerBar extends StatelessWidget {
   final Duration fallbackDuration;
   const _PlayerBar({required this.player, required this.fallbackDuration});
 
+  static const _speeds = [1.0, 1.25, 1.5, 2.0, 0.75];
+
+  Future<void> _skip(Duration by) async {
+    final total = player.duration ?? fallbackDuration;
+    var to = player.position + by;
+    if (to < Duration.zero) to = Duration.zero;
+    if (to > total) to = total;
+    await player.seek(to);
+  }
+
+  static String _speedLabel(double v) =>
+      v == v.roundToDouble() ? '${v.toInt()}×' : '$v×';
+
   @override
   Widget build(BuildContext context) {
     return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 16),
-      child: Row(
+      padding: const EdgeInsets.only(top: 16, bottom: 4),
+      child: Column(children: [
+        _mainRow(context),
+        Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            IconButton(
+              tooltip: 'Back 10 seconds',
+              icon: const Icon(Icons.replay_10),
+              onPressed: () => _skip(const Duration(seconds: -10)),
+            ),
+            const SizedBox(width: 16),
+            IconButton(
+              tooltip: 'Forward 10 seconds',
+              icon: const Icon(Icons.forward_10),
+              onPressed: () => _skip(const Duration(seconds: 10)),
+            ),
+            const SizedBox(width: 16),
+            StreamBuilder<double>(
+              stream: player.speedStream,
+              initialData: player.speed,
+              builder: (_, snap) {
+                final speed = snap.data ?? 1.0;
+                return TextButton(
+                  onPressed: () {
+                    final i = _speeds.indexOf(speed);
+                    player.setSpeed(_speeds[(i + 1) % _speeds.length]);
+                  },
+                  child: Text('Speed ${_speedLabel(speed)}'),
+                );
+              },
+            ),
+          ],
+        ),
+      ]),
+    );
+  }
+
+  Widget _mainRow(BuildContext context) {
+    return Row(
         children: [
           StreamBuilder<PlayerState>(
             stream: player.playerStateStream,
@@ -672,7 +717,7 @@ class _PlayerBar extends StatelessWidget {
                   snap.data?.processingState == ProcessingState.completed;
               return IconButton(
                 style: IconButton.styleFrom(
-                  backgroundColor: Palette.fill,
+                  backgroundColor: context.colors.fill,
                   fixedSize: const Size(56, 56),
                 ),
                 iconSize: 30,
@@ -700,7 +745,6 @@ class _PlayerBar extends StatelessWidget {
             ),
           ),
         ],
-      ),
     );
   }
 
@@ -875,8 +919,8 @@ class _ChatScreenState extends State<_ChatScreen> {
                       padding: const EdgeInsets.only(right: 6),
                       child: IconButton.filled(
                         style: IconButton.styleFrom(
-                          backgroundColor: Palette.text,
-                          foregroundColor: Colors.white,
+                          backgroundColor: context.colors.text,
+                          foregroundColor: context.colors.inverse,
                         ),
                         icon: const Icon(Icons.arrow_upward, size: 20),
                         onPressed: _pending == null ? () => _send(rec) : null,
@@ -915,7 +959,7 @@ class _Bubble extends StatelessWidget {
         constraints:
             BoxConstraints(maxWidth: MediaQuery.sizeOf(context).width * 0.75),
         decoration: BoxDecoration(
-          color: Palette.fill,
+          color: context.colors.fill,
           borderRadius: BorderRadius.circular(18),
         ),
         child: SelectableText(text, style: const TextStyle(fontSize: 16)),
@@ -949,8 +993,8 @@ class _TranscribeProgress extends StatelessWidget {
             child: LinearProgressIndicator(value: p, minHeight: 4),
           ),
           const SizedBox(height: 12),
-          const Text('You can leave this screen; it keeps going.',
-              style: TextStyle(color: Palette.muted)),
+          Text('You can leave this screen; it keeps going.',
+              style: TextStyle(color: context.colors.muted)),
           const SizedBox(height: 20),
           OutlinedButton(onPressed: onCancel, child: const Text('Cancel')),
         ],
@@ -975,8 +1019,8 @@ class _CallToAction extends StatelessWidget {
         mainAxisSize: MainAxisSize.min,
         children: [
           Text(text,
-              style: const TextStyle(
-                  color: Palette.muted, fontSize: 16, height: 1.5)),
+              style: TextStyle(
+                  color: context.colors.muted, fontSize: 16, height: 1.5)),
           if (button != null) ...[const SizedBox(height: 20), button!],
         ],
       ),

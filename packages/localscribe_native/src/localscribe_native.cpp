@@ -109,6 +109,8 @@ public:
 
     int64_t written() const { return written_; }
     int channels() const { return channels_; }
+    double rms() const { return written_ ? std::sqrt(sumSq_ / (double)written_) : 0.0; }
+    int16_t peak() const { return peak_; }
 
 private:
     void resample(const float *x, size_t n) {
@@ -128,7 +130,11 @@ private:
 
     void emit(float v) {
         v = std::max(-1.0f, std::min(1.0f, v));
-        buf_.push_back((int16_t)std::lrint(v * 32767.0f));
+        const int16_t s = (int16_t)std::lrint(v * 32767.0f);
+        buf_.push_back(s);
+        sumSq_ += (double)s * (double)s;
+        const int16_t a = (int16_t)std::abs((int)s);
+        if (a > peak_) peak_ = a;
         if (buf_.size() >= 16384) flush();
     }
 
@@ -147,6 +153,8 @@ private:
     std::vector<float> mono_;
     std::vector<int16_t> buf_;
     int64_t written_ = 0;
+    double sumSq_ = 0;
+    int16_t peak_ = 0;
 };
 
 constexpr int32_t kPcm16 = 2;   // AudioFormat.ENCODING_PCM_16BIT
@@ -289,7 +297,11 @@ int64_t decode_to_pcm(const char *path, const char *pcm_path, Job *job, std::str
             err = "Cannot write the temporary audio file (storage full?).";
             failed = true;
         }
-        if (!failed) result = writer.written();
+        if (!failed) {
+            result = writer.written();
+            LOGI("decoded pcm: %lld samples (%.2fs @16kHz), rms=%.1f peak=%d",
+                 (long long)result, result / 16000.0, writer.rms(), writer.peak());
+        }
     } while (false);
 
     if (out) fclose(out);
@@ -383,8 +395,12 @@ struct Span {
 // kChunk, cut at quiet points. With lang "auto" the first chunk's detected
 // language is kept for the rest. Progress covers `work` samples in total, of
 // which `done` were finished before this span.
+//
+// `live` (live captions: a few seconds at a time) shrinks whisper's encoder
+// window to the clip instead of the usual 30 s, which makes short clips
+// several times faster for a small loss in accuracy.
 bool transcribe_span(whisper_context *ctx, FILE *f, Span &s, int n_threads, Job *job,
-                     int64_t done, int64_t work) {
+                     int64_t done, int64_t work, bool live = false) {
     std::vector<int16_t> raw;
     std::vector<float> buf;
     int64_t pos = s.from;
@@ -412,6 +428,13 @@ bool transcribe_span(whisper_context *ctx, FILE *f, Span &s, int n_threads, Job 
         wp.print_timestamps = false;
         wp.print_special = false;
         wp.token_timestamps = true;
+        // Suppress non-speech caption tokens (e.g. "(dishes clinking)"),
+        // a known whisper hallucination on short/sparse clips.
+        wp.suppress_nst = true;
+        if (live && feed < (size_t)kRate * 30) {
+            // 50 encoder frames per second of audio, plus a little slack.
+            wp.audio_ctx = std::min(1500, (int)(feed * 50 / kRate) + 64);
+        }
 
         ProgressCtx pc{job, kDecodeShare + (int)((1000 - kDecodeShare) * (done + pos - s.from) / work),
                        (int)((1000 - kDecodeShare) * (int64_t)use / work)};
@@ -506,14 +529,27 @@ LS_API char *ls_transcribe(const char *model_path, const char *audio_path, const
     Job *job = job_ptr ? (Job *)job_ptr : &local;
     std::string err;
 
-    const int64_t total = decode_to_pcm(audio_path, pcm_path, job, err);
-    if (total < 0) {
-        unlink(pcm_path);
-        return json_error(err);
+    // Live captions pass an empty `audio_path`: `pcm_path` then already holds
+    // 16 kHz mono 16-bit PCM, is not decoded, and is left for the caller.
+    const bool raw = !audio_path || !*audio_path;
+    auto cleanup = [&] {
+        if (!raw) unlink(pcm_path);
+    };
+    int64_t total = 0;
+    if (raw) {
+        struct stat st;
+        if (stat(pcm_path, &st) != 0) return json_error("Audio chunk is missing.");
+        total = (int64_t)st.st_size / 2;
+    } else {
+        total = decode_to_pcm(audio_path, pcm_path, job, err);
+        if (total < 0) {
+            cleanup();
+            return json_error(err);
+        }
     }
     const bool pieces = ranges && n_ranges > 0;
     if (!pieces && total < kRate / 2) {
-        unlink(pcm_path);
+        cleanup();
         return strdup("{\"language\":null,\"segments\":[]}");
     }
     LOGI("decoded %.1f s of audio", (double)total / kRate);
@@ -522,7 +558,7 @@ LS_API char *ls_transcribe(const char *model_path, const char *audio_path, const
     cparams.use_gpu = false;
     whisper_context *ctx = whisper_init_from_file_with_params(model_path, cparams);
     if (!ctx) {
-        unlink(pcm_path);
+        cleanup();
         return json_error("Could not load the whisper model. Try downloading it again.");
     }
 
@@ -562,7 +598,7 @@ LS_API char *ls_transcribe(const char *model_path, const char *audio_path, const
         if (pieces && s.lang == "auto" && len < kShortTurn && known) {
             s.lang = speaker_lang[s.speaker];
         }
-        ok = transcribe_span(ctx, f, s, n_threads, job, done, work);
+        ok = transcribe_span(ctx, f, s, n_threads, job, done, work, raw);
         done += len;
         if (ok && pieces && len >= kShortTurn && s.speaker >= 0 && s.lang != "auto") {
             if (s.speaker >= (int)speaker_lang.size()) speaker_lang.resize(s.speaker + 1);
@@ -571,7 +607,7 @@ LS_API char *ls_transcribe(const char *model_path, const char *audio_path, const
     }
 
     if (f) fclose(f);
-    unlink(pcm_path);
+    cleanup();
     whisper_free(ctx);
 
     if (!ok) return json_error(job->cancel.load() ? "cancelled" : "Transcription failed.");

@@ -1,0 +1,28 @@
+{
+  "id": "smart_brief",
+  "name": "Smart Brief",
+  "description": "A summary that scales with the recording: a few lines for short clips, structured sections for long ones.",
+  "verbatim": false,
+  "source": "Original LocalScribe template.",
+  "category": "general",
+  "icon": "summary",
+  "tags": [
+    "summary",
+    "adaptive",
+    "brief",
+    "short"
+  ],
+  "outline": [
+    "Judge the length and density of the transcript and size the note to match: two or three sentences for a short clip, structured sections for a long one.",
+    "Always open with a one-sentence statement of what the recording is about.",
+    "For longer recordings add a Key Points list and group related points under short headings.",
+    "Mention names, numbers, dates and commitments exactly as spoken.",
+    "Keep it factual: never add information that is not in the transcript, and omit a section when nothing applies."
+  ],
+  "sections": [
+    "In Short",
+    "Key Points",
+    "Details"
+  ],
+  "example": "## In Short\nA 5-minute voice note about moving the launch.\n\n## Key Points\n- New date is 12 May"
+}

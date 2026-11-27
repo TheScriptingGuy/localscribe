@@ -1,0 +1,32 @@
+{
+  "id": "status_update",
+  "name": "Status Update",
+  "description": "Progress, upcoming work and risks, ready to paste into a report or message.",
+  "verbatim": false,
+  "source": "Original LocalScribe template.",
+  "category": "work",
+  "icon": "chart",
+  "tags": [
+    "status",
+    "update",
+    "report",
+    "progress",
+    "weekly",
+    "project"
+  ],
+  "outline": [
+    "Summarize the overall status in one sentence, and say if the speaker described it as on track, at risk or blocked.",
+    "List what was completed since the last update.",
+    "List what is planned next.",
+    "List risks, blockers and anything the speaker needs from others, with names if given.",
+    "Keep it short and scannable; use plain bullets.",
+    "Keep it factual: never add information that is not in the transcript, and omit a section when nothing applies."
+  ],
+  "sections": [
+    "Status",
+    "Completed",
+    "Next",
+    "Risks & Needs"
+  ],
+  "example": "## Status\nOn track for the 15 June launch.\n\n## Risks & Needs\n- Waiting on legal review"
+}

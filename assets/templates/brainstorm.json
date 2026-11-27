@@ -1,0 +1,32 @@
+{
+  "id": "brainstorm",
+  "name": "Brainstorm Session",
+  "description": "All ideas captured, clustered by theme, with the favourites and next experiments.",
+  "verbatim": false,
+  "source": "Original LocalScribe template.",
+  "category": "work",
+  "icon": "idea",
+  "tags": [
+    "brainstorm",
+    "ideas",
+    "ideation",
+    "workshop",
+    "creative",
+    "innovation"
+  ],
+  "outline": [
+    "State the problem or question the session was about.",
+    "List every idea that was suggested, even small ones, as one-line bullets.",
+    "Cluster the ideas under themes with short headings.",
+    "Mark the ideas the group showed most interest in.",
+    "List the experiments or next steps agreed, with owners where given.",
+    "Keep it factual: never add information that is not in the transcript, and omit a section when nothing applies."
+  ],
+  "sections": [
+    "Question",
+    "Ideas by Theme",
+    "Favourites",
+    "Next Steps"
+  ],
+  "example": "## Ideas by Theme\n### Pricing\n- Free tier with limits\n\n## Favourites\n- Free tier with limits"
+}

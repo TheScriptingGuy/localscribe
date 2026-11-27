@@ -1,0 +1,84 @@
+# Recipe for the official F-Droid repository: submit this file as
+# metadata/ai.localscribe.localscribe.yml in a merge request to
+# https://gitlab.com/fdroid/fdroiddata (see tool/fdroid/SUBMITTING.md).
+Categories:
+  - Multimedia
+  - Writing
+License: MIT
+SourceCode: https://github.com/TheScriptingGuy/localscribe
+IssueTracker: https://github.com/TheScriptingGuy/localscribe/issues
+
+AntiFeatures:
+  NonFreeNet:
+    en-US: Setting up a Plaud Note recorder signs in to Plaud's servers once to
+      fetch the recorder's key (optional).
+
+AutoName: LocalScribe
+
+RepoType: git
+Repo: https://github.com/TheScriptingGuy/localscribe.git
+
+Builds:
+  - versionName: 0.2.0
+    versionCode: 2002
+    commit: v0.2.0
+    submodules: true
+    output: build/app/outputs/flutter-apk/app-arm64-v8a-release.apk
+    srclibs:
+      - flutter@3.50.0
+    prebuild:
+      # F-Droid variant: drops sherpa_onnx (prebuilt onnxruntime).
+      - tool/fdroid/prepare.sh
+      - export PUB_CACHE=$(pwd)/.pub-cache
+      - $$flutter$$/bin/flutter config --no-analytics
+      - $$flutter$$/bin/flutter create --platforms=android --org ai.localscribe
+        --project-name localscribe .
+      - rm -f test/widget_test.dart
+      - cp ci/AndroidManifest.xml android/app/src/main/AndroidManifest.xml
+      - cp -r ci/res/. android/app/src/main/res/
+      - sed -i -e 's/minSdk = flutter.minSdkVersion/minSdk = 24/' -e 's/compileSdk
+        = flutter.compileSdkVersion/compileSdk = 37/' android/app/build.gradle.kts
+      - $$flutter$$/bin/flutter pub get
+    scandelete:
+      - .pub-cache
+    build:
+      - export PUB_CACHE=$(pwd)/.pub-cache
+      - $$flutter$$/bin/flutter build apk --release --split-per-abi --target-platform=android-arm64
+        --build-number=2
+    ndk: r28c
+
+  - versionName: 0.2.0
+    versionCode: 4002
+    commit: v0.2.0
+    submodules: true
+    output: build/app/outputs/flutter-apk/app-x86_64-release.apk
+    srclibs:
+      - flutter@3.50.0
+    prebuild:
+      - tool/fdroid/prepare.sh
+      - export PUB_CACHE=$(pwd)/.pub-cache
+      - $$flutter$$/bin/flutter config --no-analytics
+      - $$flutter$$/bin/flutter create --platforms=android --org ai.localscribe
+        --project-name localscribe .
+      - rm -f test/widget_test.dart
+      - cp ci/AndroidManifest.xml android/app/src/main/AndroidManifest.xml
+      - cp -r ci/res/. android/app/src/main/res/
+      - sed -i -e 's/minSdk = flutter.minSdkVersion/minSdk = 24/' -e 's/compileSdk
+        = flutter.compileSdkVersion/compileSdk = 37/' android/app/build.gradle.kts
+      - $$flutter$$/bin/flutter pub get
+    scandelete:
+      - .pub-cache
+    build:
+      - export PUB_CACHE=$(pwd)/.pub-cache
+      - $$flutter$$/bin/flutter build apk --release --split-per-abi --target-platform=android-x64
+        --build-number=2
+    ndk: r28c
+
+AutoUpdateMode: Version
+UpdateCheckMode: Tags ^v[0-9.]+$
+VercodeOperation:
+  - 2000 + %c
+  - 4000 + %c
+UpdateCheckData: pubspec.yaml|version:\s.+\+(\d+)|.|version:\s(.+)\+
+CurrentVersion: 0.2.0
+CurrentVersionCode: 4002

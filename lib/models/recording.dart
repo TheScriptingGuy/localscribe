@@ -43,6 +43,48 @@ class GeneratedNote {
       );
 }
 
+enum MarkerType { flag, photo, note }
+
+/// A moment the user marked while recording: a highlight flag, a photo or a
+/// typed note, at [atMs] from the start of the audio.
+class RecordingMarker {
+  final String id;
+  final int atMs;
+  final MarkerType type;
+  final String? text;
+
+  /// Path of the photo relative to the recording's folder, e.g. `photos/<id>.jpg`.
+  final String? photoFile;
+
+  const RecordingMarker({
+    required this.id,
+    required this.atMs,
+    required this.type,
+    this.text,
+    this.photoFile,
+  });
+
+  RecordingMarker withPhotoFile(String? file) => RecordingMarker(
+      id: id, atMs: atMs, type: type, text: text, photoFile: file);
+
+  Map<String, dynamic> toJson() => {
+        'id': id,
+        'atMs': atMs,
+        'type': type.name,
+        if (text != null) 'text': text,
+        if (photoFile != null) 'photoFile': photoFile,
+      };
+
+  factory RecordingMarker.fromJson(Map<String, dynamic> j) => RecordingMarker(
+        id: j['id'] as String,
+        atMs: (j['atMs'] as num?)?.toInt() ?? 0,
+        type: MarkerType.values.firstWhere((t) => t.name == j['type'],
+            orElse: () => MarkerType.flag),
+        text: j['text'] as String?,
+        photoFile: j['photoFile'] as String?,
+      );
+}
+
 /// One entry in the local library: audio file + transcript + notes + chat.
 /// Persisted as `recordings/<id>/meta.json` next to the audio file.
 class Recording {
@@ -58,8 +100,15 @@ class Recording {
   final List<GeneratedNote> notes;
   final List<ChatMessage> chat;
 
+  /// Highlights, photos and notes marked while recording, by time.
+  final List<RecordingMarker> markers;
+
   /// Names given to recognised speakers, by speaker id ("S1" -> "Anna").
   final Map<String, String> speakerNames;
+
+  /// For recordings from a Plaud recorder: the recorder's file id (its start
+  /// time in unix seconds), so a sync can skip files already in the library.
+  final int? deviceFileId;
 
   Recording({
     required this.id,
@@ -71,9 +120,12 @@ class Recording {
     this.transcript,
     List<GeneratedNote>? notes,
     List<ChatMessage>? chat,
+    List<RecordingMarker>? markers,
     Map<String, String>? speakerNames,
+    this.deviceFileId,
   })  : notes = notes ?? [],
         chat = chat ?? [],
+        markers = markers ?? [],
         speakerNames = speakerNames ?? {};
 
   Duration get duration => Duration(milliseconds: durationMs);
@@ -113,7 +165,9 @@ class Recording {
         'transcript': transcript?.toJson(),
         'notes': notes.map((n) => n.toJson()).toList(),
         'chat': chat.map((m) => m.toJson()).toList(),
+        if (markers.isNotEmpty) 'markers': markers.map((m) => m.toJson()).toList(),
         if (speakerNames.isNotEmpty) 'speakerNames': speakerNames,
+        if (deviceFileId != null) 'deviceFileId': deviceFileId,
       };
 
   factory Recording.fromJson(Map<String, dynamic> j) => Recording(
@@ -134,6 +188,10 @@ class Recording {
         chat: ((j['chat'] as List?) ?? const [])
             .map((e) => ChatMessage.fromJson(Map<String, dynamic>.from(e)))
             .toList(),
+        markers: ((j['markers'] as List?) ?? const [])
+            .map((e) => RecordingMarker.fromJson(Map<String, dynamic>.from(e)))
+            .toList(),
         speakerNames: Map<String, String>.from(j['speakerNames'] ?? const {}),
+        deviceFileId: (j['deviceFileId'] as num?)?.toInt(),
       );
 }

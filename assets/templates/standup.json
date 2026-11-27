@@ -1,0 +1,28 @@
+{
+  "id": "standup",
+  "name": "Daily Stand-up",
+  "description": "Per-person updates: done, doing next, blocked.",
+  "verbatim": false,
+  "source": "Original LocalScribe template.",
+  "category": "meeting",
+  "icon": "flag",
+  "tags": [
+    "standup",
+    "scrum",
+    "daily",
+    "agile",
+    "sprint",
+    "blockers"
+  ],
+  "outline": [
+    "Group the notes per speaker or participant, using the names that were spoken.",
+    "For each person list what they finished, what they will do next, and any blocker, as short bullets.",
+    "Collect all blockers again in one list at the end, with who could unblock them if mentioned.",
+    "Skip small talk and keep each bullet to one line."
+  ],
+  "sections": [
+    "Updates",
+    "Blockers"
+  ],
+  "example": "### Sam\n- Done: login bug fixed\n- Next: payment tests\n- Blocked: waiting for API keys\n\n## Blockers\n- API keys (Sam)"
+}

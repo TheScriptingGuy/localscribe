@@ -1,0 +1,21 @@
+<p>LocalScribe records conversations, meetings and lectures, transcribes them and turns them into notes, all on your phone. Nothing is uploaded unless you point it at an AI server of your own choice.</p>
+
+<p><b>Features</b></p>
+<ul>
+<li>Record with the phone microphone (keeps running with the screen off) or import audio files.</li>
+<li>Mark highlights, take photos and type notes while recording.</li>
+<li>On-device transcription with whisper.cpp, in many languages, including mixed-language recordings.</li>
+<li>Speaker recognition (who spoke when).</li>
+<li>AI notes from 30 templates (meeting minutes, lecture notes, interviews, to-do lists and more), or write your own. Runs on the phone with llama.cpp, or on an OpenAI-compatible or Anthropic API you configure (Ollama, LM Studio, vLLM and others work too).</li>
+<li>Ask questions about a recording.</li>
+<li>Export transcripts and notes as TXT, Markdown, SRT, DOCX or PDF, and audio as WAV.</li>
+<li>Light and dark theme.</li>
+</ul>
+
+<p><b>Plaud Note recorder (optional)</b></p>
+<p>If you own a Plaud Note recorder, LocalScribe can sync its recordings over Bluetooth and start, pause and stop recordings on it, including highlights made with the recorder's button. Setting this up signs in to Plaud's servers once with your own Plaud account to fetch your recorder's key; after that everything goes over Bluetooth. If you do not use a Plaud recorder, the app never contacts Plaud. LocalScribe is not affiliated with Plaud.</p>
+
+<p><b>Models</b></p>
+<p>Speech and AI models are downloaded inside the app when you choose to use them (from Hugging Face). They are not included in the app.</p>
+
+<p>In the F-Droid build, on-device speaker recognition is not included because its library is only available prebuilt; a self-hosted speaker recognition server can be used instead.</p>

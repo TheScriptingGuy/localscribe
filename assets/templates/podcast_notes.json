@@ -1,0 +1,33 @@
+{
+  "id": "podcast_notes",
+  "name": "Podcast & Show Notes",
+  "description": "Episode summary, topics with timestamps, notable quotes and links mentioned.",
+  "verbatim": false,
+  "source": "Original LocalScribe template.",
+  "category": "interview",
+  "icon": "podcast",
+  "tags": [
+    "podcast",
+    "show notes",
+    "episode",
+    "interview",
+    "radio",
+    "chapters"
+  ],
+  "outline": [
+    "Write a two-sentence episode description a listener would see in a podcast app.",
+    "Name the host and guests as spoken.",
+    "List the topics in order as chapters, with a timestamp in mm:ss if timestamps are present in the transcript.",
+    "Quote one to three memorable lines exactly.",
+    "List books, tools, people or links that were mentioned.",
+    "Keep it factual: never add information that is not in the transcript, and omit a section when nothing applies."
+  ],
+  "sections": [
+    "Description",
+    "Guests",
+    "Chapters",
+    "Quotes",
+    "Mentioned"
+  ],
+  "example": "## Chapters\n- 00:00 Intro\n- 03:40 How the idea started"
+}
