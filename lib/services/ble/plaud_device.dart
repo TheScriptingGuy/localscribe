@@ -1,6 +1,5 @@
 import 'dart:async';
 import 'dart:convert';
-import 'dart:math';
 import 'dart:typed_data';
 
 import 'package:flutter/foundation.dart';
@@ -100,6 +99,8 @@ class PlaudDeviceSession extends ChangeNotifier {
         } catch (e) {
           _log('fast transfer unavailable ($e); using Bluetooth');
           await _closeWifi(cmds, null);
+          // The recorder drops Bluetooth once its access point is up.
+          if (!_connected) cmds = await _open(cred, dev);
         }
       }
       for (final e in todo) {
@@ -138,19 +139,19 @@ class PlaudDeviceSession extends ChangeNotifier {
       PlaudCommands cmds, PlaudCredentials cred) async {
     final dev = activeDevice!;
     _set(PlaudStatus.syncing, 'Starting fast transfer…');
-    const chars = 'abcdefghijkmnpqrstuvwxyz23456789';
-    final rnd = Random.secure();
-    final pass =
-        List.generate(8, (_) => chars[rnd.nextInt(chars.length)]).join();
-    final reply = await _request(cmds, 0x0a, [0x00, ...pass.codeUnits]);
+    // Without a password in the request the recorder picks one and returns
+    // it (the Plaud app only sends its own when the recorder reports
+    // `dynamic_password_support`; this recorder ignored one we sent).
+    final reply = await _request(cmds, 0x0a, const [0x00]);
     _log('open wifi reply ${_hex(reply)}');
     if (reply.isEmpty || reply[0] != 0) {
       throw StateError('recorder refused WiFi (status '
           '${reply.isEmpty ? '?' : reply[0]})');
     }
-    final apPass = reply.length >= 9
-        ? String.fromCharCodes(reply.sublist(1, 9))
-        : pass;
+    if (reply.length < 9) {
+      throw StateError('recorder sent no WiFi password');
+    }
+    final apPass = String.fromCharCodes(reply.sublist(1, 9));
     final s = dev.serial;
     final ssid = 'PLAUD${s.length >= 4 ? s.substring(s.length - 4) : s}';
     final link = PlaudWifiLink(
