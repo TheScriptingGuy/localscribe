@@ -5,6 +5,7 @@ import 'dart:typed_data';
 
 import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart' show TextInput;
 import 'package:flutter_reactive_ble/flutter_reactive_ble.dart';
 import 'package:just_audio/just_audio.dart';
 import 'package:path/path.dart' as p;
@@ -95,11 +96,15 @@ class _PlaudDevicesScreenState extends State<PlaudDevicesScreen> {
         ));
       }
       await cred.replaceDevices(devs);
+      // Tell the autofill service the sign-in worked so it offers to save.
+      TextInput.finishAutofillContext(shouldSave: true);
       if (!mounted) return;
       setState(() => _busy = false);
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(
           content: Text('Signed in — paired ${devs.length} Plaud device(s)')));
     } catch (e) {
+      // Don't let the password manager save credentials that just failed.
+      TextInput.finishAutofillContext(shouldSave: false);
       if (!mounted) return;
       setState(() {
         _busy = false;
@@ -339,21 +344,39 @@ class _PlaudDevicesScreenState extends State<PlaudDevicesScreen> {
                 color: context.colors.faint, height: 1.4, fontSize: 13),
           ),
           const SizedBox(height: 20),
-          TextField(
-            controller: _emailCtrl,
-            keyboardType: TextInputType.emailAddress,
-            autocorrect: false,
-            decoration: const InputDecoration(
-                labelText: 'Plaud account email', border: OutlineInputBorder()),
-          ),
-          const SizedBox(height: 8),
-          TextField(
-            controller: _passwordCtrl,
-            obscureText: true,
-            autocorrect: false,
-            enableSuggestions: false,
-            decoration: const InputDecoration(
-                labelText: 'Password', border: OutlineInputBorder()),
+          // Grouping the two fields lets password managers (Bitwarden,
+          // 1Password, Google, Samsung Pass, …) fill both at once and offer to
+          // save the credentials after a successful sign-in.
+          AutofillGroup(
+            child: Column(
+              children: [
+                TextField(
+                  controller: _emailCtrl,
+                  keyboardType: TextInputType.emailAddress,
+                  textInputAction: TextInputAction.next,
+                  autocorrect: false,
+                  autofillHints: const [
+                    AutofillHints.username,
+                    AutofillHints.email,
+                  ],
+                  decoration: const InputDecoration(
+                      labelText: 'Plaud account email',
+                      border: OutlineInputBorder()),
+                ),
+                const SizedBox(height: 8),
+                TextField(
+                  controller: _passwordCtrl,
+                  obscureText: true,
+                  autocorrect: false,
+                  enableSuggestions: false,
+                  textInputAction: TextInputAction.done,
+                  autofillHints: const [AutofillHints.password],
+                  onSubmitted: (_) => _busy ? null : _signIn(),
+                  decoration: const InputDecoration(
+                      labelText: 'Password', border: OutlineInputBorder()),
+                ),
+              ],
+            ),
           ),
           const SizedBox(height: 12),
           FilledButton.icon(
