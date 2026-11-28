@@ -109,7 +109,14 @@ class _DeviceRecordScreenState extends State<DeviceRecordScreen> {
       return;
     }
     if (!mounted) return;
-    final cred = context.read<PlaudCredentials>();
+    final account = context
+        .read<PlaudCredentials>()
+        .accountFor(widget.device.serial);
+    if (account == null) {
+      setState(() => _error = 'This recorder is not on a signed-in Plaud '
+          'account. Sign in again from Plaud devices.');
+      return;
+    }
     setState(() {
       _starting = true;
       _error = null;
@@ -120,7 +127,7 @@ class _DeviceRecordScreenState extends State<DeviceRecordScreen> {
           'Recording on ${widget.device.name}', 'Tap to return to LocalScribe');
     } catch (_) {/* foreground-only then */}
     _markSub = _session.deviceMarks.listen(_onRecorderMark);
-    final ok = await _session.startRecording(cred, widget.device);
+    final ok = await _session.startRecording(account, widget.device);
     if (!mounted) return;
     if (!ok) {
       await RecordingService.stopWork(_workOwner).catchError((_) {});
@@ -230,7 +237,10 @@ class _DeviceRecordScreenState extends State<DeviceRecordScreen> {
     if (_stopping) return;
     _commitNote();
     final store = context.read<RecordingStore>();
-    final pem = context.read<PlaudCredentials>().rsaPrivateKeyPem;
+    final account = context
+        .read<PlaudCredentials>()
+        .accountFor(widget.device.serial);
+    final pem = account?.rsaPrivateKeyPem;
     final navigator = Navigator.of(context);
     final messenger = ScaffoldMessenger.of(context);
     setState(() => _stopping = true);
@@ -257,7 +267,10 @@ class _DeviceRecordScreenState extends State<DeviceRecordScreen> {
         if (!e.fromRecorder) e.marker,
     ];
     final rec = await addPlaudRecording(store, priv, result,
-        markers: mine, photos: Map.of(_photos));
+        markers: mine,
+        photos: Map.of(_photos),
+        serial: widget.device.serial,
+        accountId: account?.userId);
     // Like the Plaud app: back to the files list, where it shows up on top.
     navigator.pop();
     messenger.showSnackBar(SnackBar(content: Text('Saved "${rec.title}"')));

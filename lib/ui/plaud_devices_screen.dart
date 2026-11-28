@@ -41,6 +41,7 @@ class _PlaudDevicesScreenState extends State<PlaudDevicesScreen> {
   StreamSubscription<DiscoveredDevice>? _scanSub;
 
   bool _busy = false;
+  bool _adding = false;
   bool _scanning = false;
   String? _error;
   final Set<String> _nearbyIds = {};
@@ -84,9 +85,11 @@ class _PlaudDevicesScreenState extends State<PlaudDevicesScreen> {
         throw StateError(
             'No e2ee key returned by Plaud (account has no escrowed key yet?).');
       }
+      final userId = acc.userId;
+      if (userId == null || userId.isEmpty) {
+        throw StateError('Plaud returned no user id for this account.');
+      }
       final cred = context.read<PlaudCredentials>();
-      await cred.setIdentity(
-          userId: acc.userId ?? '', pem: pem, token: acc.accessToken);
       final devs = <PlaudDeviceCred>[];
       for (final d in acc.devices) {
         devs.add(PlaudDeviceCred(
@@ -95,13 +98,28 @@ class _PlaudDevicesScreenState extends State<PlaudDevicesScreen> {
           publicKey: acc.deviceKeys[d.sn] ?? Uint8List(256),
         ));
       }
-      await cred.replaceDevices(devs);
+      // Signing in again with an account already here refreshes it in place;
+      // a different account is added next to the others.
+      await cred.upsertAccount(PlaudAccount(
+        userId: userId,
+        email: email,
+        accessToken: acc.accessToken,
+        refreshToken: acc.refreshToken,
+        rsaPrivateKeyPem: pem,
+        devices: devs,
+      ));
       // Tell the autofill service the sign-in worked so it offers to save.
       TextInput.finishAutofillContext(shouldSave: true);
       if (!mounted) return;
-      setState(() => _busy = false);
+      _emailCtrl.clear();
+      _passwordCtrl.clear();
+      setState(() {
+        _busy = false;
+        _adding = false;
+      });
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-          content: Text('Signed in — paired ${devs.length} Plaud device(s)')));
+          content: Text('Signed in as $email — paired ${devs.length} '
+              'Plaud device(s)')));
     } catch (e) {
       // Don't let the password manager save credentials that just failed.
       TextInput.finishAutofillContext(shouldSave: false);
@@ -150,9 +168,8 @@ class _PlaudDevicesScreenState extends State<PlaudDevicesScreen> {
     if (mounted) setState(() => _scanning = false);
   }
 
-  Future<void> _syncCloud() async {
-    final cred = context.read<PlaudCredentials>();
-    final token = cred.accessToken;
+  Future<void> _syncCloud(PlaudAccount account) async {
+    final token = account.accessToken;
     if (token == null || token.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('Sign in to Plaud first.')));
@@ -163,107 +180,41 @@ class _PlaudDevicesScreenState extends State<PlaudDevicesScreen> {
       _error = null;
     });
     try {
-      final api = PlaudCloudApi();
+      final api = PlaudCloudApi(baseUrl: account.apiBase);
       final recs = await api.listRecordings(token);
       // Newest first (start at the most recent recording).
       recs.sort((a, b) => b.startTimeMs.compareTo(a.startTimeMs));
       if (!mounted) return;
       final store = context.read<RecordingStore>();
+      // Skip what an earlier cloud sync already brought in.
+      final have = store.plaudCloudIds;
+      final todo = [
+        for (final r in recs)
+          if (!have.contains(r.id)) r,
+      ];
       final tmp = await getTemporaryDirectory();
       final dio = Dio();
       var saved = 0;
-      for (final r in recs) {
-        final url = await api.getTempUrl(token, r.id);
-        final resp = await dio.get<List<int>>(url,
-            options: Options(responseType: ResponseType.bytes));
-        final bytes = Uint8List.fromList(resp.data!);
-        final head = bytes
-            .take(16)
-            .map((b) => b.toRadixString(16).padLeft(2, '0'))
-            .join(' ');
-        developer.log(
-            'cloud file ${r.id}: ${bytes.length} B, '
-            'type=${resp.headers.value('content-type')}, head=$head',
-            name: 'PlaudSync');
-
-        var durationMs = r.durationMs;
-        var markers = const <RecordingMarker>[];
-        File f;
-        final container = PlaudContainer(bytes);
-        if (container.looksValid) {
-          // Private Cloud Sync stores the recorder's end-to-end encrypted
-          // PLAUD.AI container as-is; unmask it with the account's RSA key,
-          // exactly like a BLE download.
-          final pem = cred.rsaPrivateKeyPem;
-          if (pem == null || pem.isEmpty) {
-            throw StateError(
-                'Recording ${r.id} is end-to-end encrypted, but no Plaud key '
-                'is loaded. Sign in again to fetch it.');
-          }
-          final audio = container.decode(PlaudCrypto.privateKeyFromPem(pem));
-          if (audio.packets.isEmpty) {
-            throw StateError(
-                'Could not decrypt recording ${r.id} with the loaded Plaud key.');
-          }
-          durationMs = audio.durationMs;
-          markers = recorderMarkers(audio.markMs);
-          f = File(p.join(tmp.path, 'plaud_${r.id}.opus'));
-          await f.writeAsBytes(PlaudContainer.oggOpusOf(audio.packets),
-              flush: true);
-        } else if (_isRawPlaudOpus(bytes)) {
-          // The cloud usually serves the recorder's audio already decrypted
-          // but still as bare 80-byte Opus units (no container). Wrap them in
-          // Ogg so the player and transcriber can read them.
-          final packets = <Uint8List>[];
-          final marks = <int>[];
-          for (var off = 0;
-              off + PlaudContainer.unitSize <= bytes.length;
-              off += PlaudContainer.unitSize) {
-            final pkt = Uint8List.fromList(
-                bytes.sublist(off, off + PlaudContainer.unitSize));
-            if (pkt[0] == PlaudContainer.markToc) {
-              marks.add(packets.length * PlaudContainer.unitMs);
-              pkt[0] = _plaudToc;
-            }
-            packets.add(pkt);
-          }
-          durationMs = packets.length * PlaudContainer.unitMs;
-          markers = recorderMarkers(marks);
-          f = File(p.join(tmp.path, 'plaud_${r.id}.opus'));
-          await f.writeAsBytes(PlaudContainer.oggOpusOf(packets), flush: true);
-        } else {
-          f = File(p.join(tmp.path, 'plaud_${r.id}${_audioExt(bytes)}'));
-          await f.writeAsBytes(bytes, flush: true);
+      var failed = 0;
+      String? firstError;
+      for (final r in todo) {
+        try {
+          await _importCloudRecording(account, api, dio, store, tmp, r);
+          saved++;
+        } catch (e) {
+          failed++;
+          firstError ??= '$e';
         }
-        // The file list carries the duration (ms); fall back to probing the
-        // file if the server didn't report one.
-        if (durationMs <= 0) {
-          final probe = AudioPlayer();
-          try {
-            durationMs = (await probe.setFilePath(f.path))?.inMilliseconds ?? 0;
-          } catch (_) {
-            // Unknown to the player; still transcribable.
-          } finally {
-            await probe.dispose();
-          }
-        }
-        await store.add(
-          f,
-          title: r.filename.isEmpty ? r.id : r.filename,
-          source: RecordingSource.plaud,
-          durationMs: durationMs,
-          markers: markers,
-          createdAt: r.startTimeMs > 0
-              ? DateTime.fromMillisecondsSinceEpoch(r.startTimeMs)
-              : null,
-          move: true,
-        );
-        saved++;
       }
       if (!mounted) return;
-      setState(() => _busy = false);
+      setState(() {
+        _busy = false;
+        if (failed > 0) _error = '$failed recording(s) failed: $firstError';
+      });
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-          content: Text('Synced $saved recording(s) from Plaud cloud')));
+          content: Text(todo.isEmpty
+              ? 'Plaud cloud: nothing new'
+              : 'Synced $saved recording(s) from Plaud cloud')));
     } catch (e) {
       if (!mounted) return;
       setState(() {
@@ -271,6 +222,104 @@ class _PlaudDevicesScreenState extends State<PlaudDevicesScreen> {
         _error = '$e';
       });
     }
+  }
+
+  /// Downloads one cloud recording of [account] and adds it to the library.
+  Future<void> _importCloudRecording(
+      PlaudAccount account,
+      PlaudCloudApi api,
+      Dio dio,
+      RecordingStore store,
+      Directory tmp,
+      PlaudCloudRecording r) async {
+    final url = await api.getTempUrl(account.accessToken ?? '', r.id);
+    final resp = await dio.get<List<int>>(url,
+        options: Options(responseType: ResponseType.bytes));
+    final bytes = Uint8List.fromList(resp.data!);
+    final head = bytes
+        .take(16)
+        .map((b) => b.toRadixString(16).padLeft(2, '0'))
+        .join(' ');
+    developer.log(
+        'cloud file ${r.id}: ${bytes.length} B, '
+        'type=${resp.headers.value('content-type')}, head=$head',
+        name: 'PlaudSync');
+
+    var durationMs = r.durationMs;
+    var markers = const <RecordingMarker>[];
+    File f;
+    final container = PlaudContainer(bytes);
+    if (container.looksValid) {
+      // Private Cloud Sync stores the recorder's end-to-end encrypted
+      // PLAUD.AI container as-is; unmask it with the account's RSA key,
+      // exactly like a BLE download.
+      final pem = account.rsaPrivateKeyPem;
+      if (pem == null || pem.isEmpty) {
+        throw StateError(
+            'Recording ${r.id} is end-to-end encrypted, but no Plaud key '
+            'is loaded. Sign in again to fetch it.');
+      }
+      final audio = container.decode(PlaudCrypto.privateKeyFromPem(pem));
+      if (audio.packets.isEmpty) {
+        throw StateError(
+            'Could not decrypt recording ${r.id} with the loaded Plaud key.');
+      }
+      durationMs = audio.durationMs;
+      markers = recorderMarkers(audio.markMs);
+      f = File(p.join(tmp.path, 'plaud_${r.id}.opus'));
+      await f.writeAsBytes(PlaudContainer.oggOpusOf(audio.packets),
+          flush: true);
+    } else if (_isRawPlaudOpus(bytes)) {
+      // The cloud usually serves the recorder's audio already decrypted
+      // but still as bare 80-byte Opus units (no container). Wrap them in
+      // Ogg so the player and transcriber can read them.
+      final packets = <Uint8List>[];
+      final marks = <int>[];
+      for (var off = 0;
+          off + PlaudContainer.unitSize <= bytes.length;
+          off += PlaudContainer.unitSize) {
+        final pkt = Uint8List.fromList(
+            bytes.sublist(off, off + PlaudContainer.unitSize));
+        if (pkt[0] == PlaudContainer.markToc) {
+          marks.add(packets.length * PlaudContainer.unitMs);
+          pkt[0] = _plaudToc;
+        }
+        packets.add(pkt);
+      }
+      durationMs = packets.length * PlaudContainer.unitMs;
+      markers = recorderMarkers(marks);
+      f = File(p.join(tmp.path, 'plaud_${r.id}.opus'));
+      await f.writeAsBytes(PlaudContainer.oggOpusOf(packets), flush: true);
+    } else {
+      f = File(p.join(tmp.path, 'plaud_${r.id}${_audioExt(bytes)}'));
+      await f.writeAsBytes(bytes, flush: true);
+    }
+    // The file list carries the duration (ms); fall back to probing the
+    // file if the server didn't report one.
+    if (durationMs <= 0) {
+      final probe = AudioPlayer();
+      try {
+        durationMs = (await probe.setFilePath(f.path))?.inMilliseconds ?? 0;
+      } catch (_) {
+        // Unknown to the player; still transcribable.
+      } finally {
+        await probe.dispose();
+      }
+    }
+    await store.add(
+      f,
+      title: r.filename.isEmpty ? r.id : r.filename,
+      source: RecordingSource.plaud,
+      durationMs: durationMs,
+      markers: markers,
+      createdAt: r.startTimeMs > 0
+          ? DateTime.fromMillisecondsSinceEpoch(r.startTimeMs)
+          : null,
+      move: true,
+      plaudAccountId: account.userId,
+      plaudSerial: r.serialNumber.isEmpty ? null : r.serialNumber,
+      plaudCloudId: r.id,
+    );
   }
 
   /// Opus TOC of every Plaud recorder packet (CELT WB, mono, 20 ms).
@@ -324,15 +373,20 @@ class _PlaudDevicesScreenState extends State<PlaudDevicesScreen> {
     final cred = context.watch<PlaudCredentials>();
     return Scaffold(
       appBar: AppBar(title: const Text('Plaud devices')),
-      body: cred.userId == null ? _signInBody() : _devicesBody(cred),
+      body: (!cred.hasAccounts || _adding)
+          ? _signInBody(cred)
+          : _accountsBody(cred),
     );
   }
 
-  Widget _signInBody() => ListView(
+  Widget _signInBody(PlaudCredentials cred) => ListView(
         padding: const EdgeInsets.all(16),
         children: [
           Text(
-            'Sign in to Plaud to pair every recorder on your account.',
+            cred.hasAccounts
+                ? 'Add another Plaud account. Its recorders are paired next to '
+                    'the ones you already have.'
+                : 'Sign in to Plaud to pair every recorder on your account.',
             style: TextStyle(color: context.colors.muted, height: 1.4),
           ),
           const SizedBox(height: 8),
@@ -384,6 +438,16 @@ class _PlaudDevicesScreenState extends State<PlaudDevicesScreen> {
             icon: const Icon(Icons.cloud_done_outlined),
             label: Text(_busy ? 'Signing in…' : 'Sign in & pair devices'),
           ),
+          if (cred.hasAccounts)
+            TextButton(
+              onPressed: _busy
+                  ? null
+                  : () => setState(() {
+                        _adding = false;
+                        _error = null;
+                      }),
+              child: const Text('Cancel'),
+            ),
           if (_error != null) ...[
             const SizedBox(height: 12),
             Text(_error!, style: TextStyle(color: context.colors.danger)),
@@ -391,14 +455,15 @@ class _PlaudDevicesScreenState extends State<PlaudDevicesScreen> {
         ],
       );
 
-  Widget _devicesBody(PlaudCredentials cred) => ListView(
+  Widget _accountsBody(PlaudCredentials cred) => ListView(
         padding: const EdgeInsets.all(16),
         children: [
           Row(
             children: [
               Expanded(
                 child: Text(
-                  '${cred.devices.length} device(s) on your account',
+                  '${cred.accounts.length} Plaud account(s) · '
+                  '${cred.devices.length} device(s)',
                   style: const TextStyle(fontWeight: FontWeight.w700),
                 ),
               ),
@@ -419,38 +484,84 @@ class _PlaudDevicesScreenState extends State<PlaudDevicesScreen> {
                 style: TextStyle(color: context.colors.muted),
               ),
             ),
-          if (cred.devices.isEmpty)
-            Padding(
-              padding: const EdgeInsets.symmetric(vertical: 24),
-              child: Text('No devices on this account.',
-                  style: TextStyle(color: context.colors.muted)),
-            )
-          else
-            ...cred.devices.map((d) => _deviceCard(d)),
-          const SizedBox(height: 16),
+          for (final a in cred.accounts) ..._accountSection(a),
+          const SizedBox(height: 8),
           OutlinedButton.icon(
-            onPressed: _busy ? null : _syncCloud,
-            icon: const Icon(Icons.cloud_download_outlined),
-            label: Text(_busy ? 'Syncing…' : 'Sync recordings from Plaud cloud'),
+            onPressed: _busy
+                ? null
+                : () => setState(() {
+                      _adding = true;
+                      _error = null;
+                    }),
+            icon: const Icon(Icons.person_add_alt_1_outlined),
+            label: const Text('Add another Plaud account'),
           ),
           if (_error != null) ...[
             const SizedBox(height: 12),
             Text(_error!, style: TextStyle(color: context.colors.danger)),
           ],
-          const SizedBox(height: 24),
-          const Divider(),
-          const SizedBox(height: 8),
-          TextButton.icon(
-            onPressed: () async {
-              await context.read<PlaudCredentials>().clear();
-              if (mounted) setState(() {});
-            },
-            icon: Icon(Icons.logout, color: context.colors.danger),
-            label: Text('Sign out of Plaud',
-                style: TextStyle(color: context.colors.danger)),
-          ),
         ],
       );
+
+  /// One signed-in account: header with sign out, its recorders, its cloud sync.
+  List<Widget> _accountSection(PlaudAccount a) => [
+        const SizedBox(height: 8),
+        Row(
+          children: [
+            Icon(Icons.account_circle_outlined, color: context.colors.muted),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Text(a.label,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                      fontSize: 15, fontWeight: FontWeight.w600)),
+            ),
+            IconButton(
+              tooltip: 'Sign out of ${a.label}',
+              icon: Icon(Icons.logout, color: context.colors.danger),
+              onPressed: () => _confirmSignOut(a),
+            ),
+          ],
+        ),
+        const SizedBox(height: 4),
+        if (a.devices.isEmpty)
+          Padding(
+            padding: const EdgeInsets.symmetric(vertical: 16),
+            child: Text('No devices on this account.',
+                style: TextStyle(color: context.colors.muted)),
+          )
+        else
+          ...a.devices.map(_deviceCard),
+        OutlinedButton.icon(
+          onPressed: _busy ? null : () => _syncCloud(a),
+          icon: const Icon(Icons.cloud_download_outlined),
+          label: Text(_busy ? 'Syncing…' : 'Sync recordings from Plaud cloud'),
+        ),
+        const SizedBox(height: 8),
+        const Divider(),
+      ];
+
+  Future<void> _confirmSignOut(PlaudAccount a) async {
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text('Sign out of ${a.label}?'),
+        content: const Text('Its recorders are removed from this phone. '
+            'Recordings already in your library stay.'),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: const Text('Cancel')),
+          TextButton(
+              onPressed: () => Navigator.pop(ctx, true),
+              child: const Text('Sign out')),
+        ],
+      ),
+    );
+    if (ok != true || !mounted) return;
+    await context.read<PlaudCredentials>().removeAccount(a.userId);
+    if (mounted) setState(() {});
+  }
 
   Widget _deviceCard(PlaudDeviceCred d) {
     final paired = d.publicKey.length == 256 && d.publicKey.any((b) => b != 0);

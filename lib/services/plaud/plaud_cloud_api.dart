@@ -130,6 +130,7 @@ class PlaudAccountDevice {
 class PlaudCloudAccount {
   final String? userId;
   final String? accessToken;
+  final String? refreshToken;
   final String? privateKeyPem;
   final String? publicKeyPem;
   final List<PlaudAccountDevice> devices;
@@ -138,6 +139,7 @@ class PlaudCloudAccount {
   PlaudCloudAccount({
     this.userId,
     this.accessToken,
+    this.refreshToken,
     this.privateKeyPem,
     this.publicKeyPem,
     this.devices = const [],
@@ -414,6 +416,7 @@ class PlaudCloudApi {
     return PlaudCloudAccount(
       userId: session.userId.isNotEmpty ? session.userId : null,
       accessToken: session.accessToken,
+      refreshToken: session.refreshToken.isEmpty ? null : session.refreshToken,
       privateKeyPem:
           _b64Pem(e2ee, const ['private_key_base64', 'private_key', 'user_key']),
       publicKeyPem: _b64Pem(e2ee, const ['public_key_base64', 'public_key']),

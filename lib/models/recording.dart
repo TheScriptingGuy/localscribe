@@ -110,6 +110,17 @@ class Recording {
   /// time in unix seconds), so a sync can skip files already in the library.
   final int? deviceFileId;
 
+  /// Which recorder and Plaud account a Plaud recording came from. Recorders
+  /// can start a file in the same second, so [deviceFileId] is only unique
+  /// together with [plaudSerial]. Null on recordings made before accounts were
+  /// tracked.
+  final String? plaudSerial;
+  final String? plaudAccountId;
+
+  /// For recordings downloaded from the Plaud cloud: the cloud file id, so a
+  /// later cloud sync skips what is already in the library.
+  final String? plaudCloudId;
+
   Recording({
     required this.id,
     required this.title,
@@ -123,6 +134,9 @@ class Recording {
     List<RecordingMarker>? markers,
     Map<String, String>? speakerNames,
     this.deviceFileId,
+    this.plaudSerial,
+    this.plaudAccountId,
+    this.plaudCloudId,
   })  : notes = notes ?? [],
         chat = chat ?? [],
         markers = markers ?? [],
@@ -168,6 +182,9 @@ class Recording {
         if (markers.isNotEmpty) 'markers': markers.map((m) => m.toJson()).toList(),
         if (speakerNames.isNotEmpty) 'speakerNames': speakerNames,
         if (deviceFileId != null) 'deviceFileId': deviceFileId,
+        if (plaudSerial != null) 'plaudSerial': plaudSerial,
+        if (plaudAccountId != null) 'plaudAccountId': plaudAccountId,
+        if (plaudCloudId != null) 'plaudCloudId': plaudCloudId,
       };
 
   factory Recording.fromJson(Map<String, dynamic> j) => Recording(
@@ -193,5 +210,8 @@ class Recording {
             .toList(),
         speakerNames: Map<String, String>.from(j['speakerNames'] ?? const {}),
         deviceFileId: (j['deviceFileId'] as num?)?.toInt(),
+        plaudSerial: j['plaudSerial'] as String?,
+        plaudAccountId: j['plaudAccountId'] as String?,
+        plaudCloudId: j['plaudCloudId'] as String?,
       );
 }

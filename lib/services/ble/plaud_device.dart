@@ -85,7 +85,7 @@ class PlaudDeviceSession extends ChangeNotifier {
   /// With [fast], the recordings come over the recorder's own WiFi access
   /// point ("fast transfer") instead of BLE; the list and setup stay on BLE.
   /// If WiFi can't be brought up the sync carries on over BLE.
-  Future<void> sync(PlaudCredentials cred, PlaudDeviceCred dev,
+  Future<void> sync(PlaudAccount cred, PlaudDeviceCred dev,
       {Set<int> skip = const {}, bool fast = false}) async {
     downloads.clear();
     PlaudWifiLink? wifi;
@@ -142,7 +142,7 @@ class PlaudDeviceSession extends ChangeNotifier {
   /// `PLAUD` + the last 4 of its serial; once the phone has joined it, the
   /// recorder connects to the phone's WebSocket server on port 8081.
   Future<PlaudWifiLink> _openWifi(
-      PlaudCommands cmds, PlaudCredentials cred) async {
+      PlaudCommands cmds, PlaudAccount cred) async {
     final dev = activeDevice!;
     _set(PlaudStatus.syncing, 'Starting fast transfer…');
     // The recorder's reply is just a status byte; the access point's
@@ -165,7 +165,7 @@ class PlaudDeviceSession extends ChangeNotifier {
       keys: _keys!,
       nextSeq: cmds.takeSeq,
       serial: s,
-      token: cred.userId ?? '',
+      token: cred.userId,
       log: _log,
     );
     try {
@@ -198,7 +198,7 @@ class PlaudDeviceSession extends ChangeNotifier {
   /// Returns the live command channel (a fresh one if BLE was re-opened),
   /// or [cmds] unchanged.
   Future<PlaudCommands?> _closeWifi(PlaudCommands? cmds, PlaudWifiLink? link,
-      {PlaudCredentials? cred, PlaudDeviceCred? dev}) async {
+      {PlaudAccount? cred, PlaudDeviceCred? dev}) async {
     await link?.close();
     try {
       await LocalscribeWifi.leaveAp();
@@ -247,7 +247,7 @@ class PlaudDeviceSession extends ChangeNotifier {
 
   /// Scan, connect, handshake, then the session setup the Plaud app does on
   /// every connect (auth, device info, ops 0x19/0x18).
-  Future<PlaudCommands> _open(PlaudCredentials cred, PlaudDeviceCred dev) async {
+  Future<PlaudCommands> _open(PlaudAccount cred, PlaudDeviceCred dev) async {
     // Reset session state so a re-connect starts a fresh handshake (a previous
     // session's key/chunks otherwise cause "mac check failed" on the new one).
     _keys = null;
@@ -263,7 +263,7 @@ class PlaudDeviceSession extends ChangeNotifier {
 
     _set(PlaudStatus.handshaking, 'Setting up…');
     final cmds = PlaudCommands(_keys!);
-    await _sendCmd(cmds, 0x01, [0x02, 0x00, 0x00, ...(cred.userId ?? '').codeUnits]);
+    await _sendCmd(cmds, 0x01, [0x02, 0x00, 0x00, ...cred.userId.codeUnits]);
     await _settle();
     await _sendCmd(cmds, 0x6c, const []);
     await _settle();
@@ -389,7 +389,7 @@ class PlaudDeviceSession extends ChangeNotifier {
   ///   op 0x1c fileId, size, 0  stream everything from there on, live
   ///
   /// Returns false (with [message] set) if it could not start.
-  Future<bool> startRecording(PlaudCredentials cred, PlaudDeviceCred dev) async {
+  Future<bool> startRecording(PlaudAccount cred, PlaudDeviceCred dev) async {
     try {
       final priv = PlaudCrypto.privateKeyFromPem(cred.rsaPrivateKeyPem!);
       final cmds = await _open(cred, dev);

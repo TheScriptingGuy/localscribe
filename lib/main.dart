@@ -153,7 +153,11 @@ class _RootShellState extends State<RootShell> {
 
   Future<void> _newRecording() async {
     final cred = context.read<PlaudCredentials>();
-    final recorders = cred.isConfigured ? cred.devices : const <PlaudDeviceCred>[];
+    // Recorders on every signed-in account that holds a key.
+    final recorders = <PlaudDeviceCred>[
+      for (final a in cred.accounts)
+        if (a.isConfigured) ...a.devices,
+    ];
     final choice = await showModalBottomSheet<String>(
       context: context,
       showDragHandle: true,
@@ -219,8 +223,10 @@ class _RootShellState extends State<RootShell> {
   }
 
   /// Which recorder to record on, when more than one is paired.
-  Future<PlaudDeviceCred?> _pickRecorder(List<PlaudDeviceCred> recorders) =>
-      showModalBottomSheet<PlaudDeviceCred>(
+  Future<PlaudDeviceCred?> _pickRecorder(List<PlaudDeviceCred> recorders) {
+    final cred = context.read<PlaudCredentials>();
+    final multi = cred.accounts.length > 1;
+    return showModalBottomSheet<PlaudDeviceCred>(
         context: context,
         showDragHandle: true,
         builder: (ctx) => SafeArea(
@@ -239,7 +245,10 @@ class _RootShellState extends State<RootShell> {
                   _SheetAction(
                     icon: Icons.settings_remote_outlined,
                     title: d.name,
-                    subtitle: 'Serial ${d.serial}',
+                    subtitle: multi
+                        ? 'Serial ${d.serial} · '
+                            '${cred.accountFor(d.serial)?.label ?? ''}'
+                        : 'Serial ${d.serial}',
                     onTap: () => Navigator.pop(ctx, d),
                   ),
               ],
@@ -247,6 +256,7 @@ class _RootShellState extends State<RootShell> {
           ),
         ),
       );
+  }
 
   @override
   Widget build(BuildContext context) {

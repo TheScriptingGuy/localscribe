@@ -47,7 +47,7 @@ class _PlaudImportScreenState extends State<PlaudImportScreen> {
             true); // granted or not-applicable
   }
 
-  Future<void> _sync(PlaudCredentials cred, PlaudDeviceCred dev) async {
+  Future<void> _sync(PlaudAccount cred, PlaudDeviceCred dev) async {
     if (!await _ensurePermissions()) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
@@ -59,10 +59,7 @@ class _PlaudImportScreenState extends State<PlaudImportScreen> {
       _saved = 0;
     });
     final store = context.read<RecordingStore>();
-    final have = {
-      for (final r in store.all)
-        if (r.deviceFileId != null) r.deviceFileId!,
-    };
+    final have = store.deviceFileIdsFor(dev.serial);
     await _session.sync(cred, dev, skip: have, fast: _fast);
     if (!mounted) return;
     // Persist whatever came down: unmask the Opus, wrap it in Ogg so the
@@ -73,7 +70,8 @@ class _PlaudImportScreenState extends State<PlaudImportScreen> {
         ? null
         : PlaudCrypto.privateKeyFromPem(pem);
     for (final d in _session.downloads) {
-      await addPlaudRecording(store, priv, d);
+      await addPlaudRecording(store, priv, d,
+          serial: dev.serial, accountId: cred.userId);
       _saved++;
     }
     if (!mounted) return;
@@ -128,7 +126,8 @@ class _PlaudImportScreenState extends State<PlaudImportScreen> {
             ? cred.deviceBySerial(widget.serial!)
             : null) ??
         (cred.devices.isNotEmpty ? cred.devices.first : null);
-    if (dev == null) {
+    final account = dev == null ? null : cred.accountFor(dev.serial);
+    if (dev == null || account == null) {
       return Center(
           child: Text('No paired device.',
               style: TextStyle(color: context.colors.muted)));
@@ -143,7 +142,9 @@ class _PlaudImportScreenState extends State<PlaudImportScreen> {
               contentPadding: EdgeInsets.zero,
               leading: const Icon(Icons.memory),
               title: Text(dev.name),
-              subtitle: Text('serial ${dev.serial}'),
+              subtitle: Text(cred.accounts.length > 1
+                  ? 'serial ${dev.serial} · ${account.label}'
+                  : 'serial ${dev.serial}'),
             ),
             SwitchListTile(
               contentPadding: EdgeInsets.zero,
@@ -156,7 +157,7 @@ class _PlaudImportScreenState extends State<PlaudImportScreen> {
             ),
             const SizedBox(height: 8),
             FilledButton.icon(
-              onPressed: _running ? null : () => _sync(cred, dev),
+              onPressed: _running ? null : () => _sync(account, dev),
               icon: const Icon(Icons.bluetooth_searching),
               label: Text(_running ? 'Syncing…' : 'Connect & sync'),
             ),

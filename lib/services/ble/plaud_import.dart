@@ -26,6 +26,8 @@ Future<Recording> addPlaudRecording(
   String? title,
   List<RecordingMarker> markers = const [],
   Map<String, File> photos = const {},
+  String? serial,
+  String? accountId,
 }) async {
   final tmp = await getTemporaryDirectory();
   final stem = 'plaud_${d.fileId.toRadixString(16)}';
@@ -55,6 +57,8 @@ Future<Recording> addPlaudRecording(
     photos: photos,
     createdAt: fileIdTime(d.fileId),
     deviceFileId: d.fileId,
+    plaudSerial: serial,
+    plaudAccountId: accountId,
   );
 }
 

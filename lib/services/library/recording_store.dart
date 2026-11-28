@@ -52,6 +52,22 @@ class RecordingStore extends ChangeNotifier {
   bool hasDeviceFile(int fileId) =>
       _items.any((r) => r.deviceFileId == fileId);
 
+  /// File ids already in the library from the recorder [serial]. Recordings
+  /// saved before the serial was tracked (null) count for every recorder, as
+  /// they did before, so an upgrade never re-downloads them.
+  Set<int> deviceFileIdsFor(String serial) => {
+        for (final r in _items)
+          if (r.deviceFileId != null &&
+              (r.plaudSerial == null || r.plaudSerial == serial))
+            r.deviceFileId!,
+      };
+
+  /// Plaud cloud file ids already in the library.
+  Set<String> get plaudCloudIds => {
+        for (final r in _items)
+          if (r.plaudCloudId != null) r.plaudCloudId!,
+      };
+
   File audioOf(Recording r) => File(p.join(_root.path, r.id, r.audioFile));
 
   /// The photo attached to [m], or null for markers without one.
@@ -78,6 +94,9 @@ class RecordingStore extends ChangeNotifier {
     Map<String, File> photos = const {},
     DateTime? createdAt,
     int? deviceFileId,
+    String? plaudSerial,
+    String? plaudAccountId,
+    String? plaudCloudId,
   }) async {
     final id = _uuid.v4();
     final dir = Directory(p.join(_root.path, id));
@@ -127,6 +146,9 @@ class RecordingStore extends ChangeNotifier {
       source: source,
       markers: saved,
       deviceFileId: deviceFileId,
+      plaudSerial: plaudSerial,
+      plaudAccountId: plaudAccountId,
+      plaudCloudId: plaudCloudId,
     );
     await _write(rec);
     _items.add(rec);
