@@ -1,0 +1,1 @@
+Plaud Note: fast transfer over the recorder's own WiFi now works and switches the recorder's WiFi off afterwards. The Plaud sign-in works with password managers (autofill).
