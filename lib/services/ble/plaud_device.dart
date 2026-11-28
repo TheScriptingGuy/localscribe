@@ -638,6 +638,28 @@ class PlaudDeviceSession extends ChangeNotifier {
   }
 
 
+  /// Reads the recorder's battery level (0-100) over the standard GATT
+  /// Battery Service (0x180F/0x2A19), without the Plaud handshake or a
+  /// private key — just a scan, connect and one characteristic read.
+  /// Returns null if the recorder isn't nearby or the read fails.
+  Future<int?> readBattery(PlaudDeviceCred dev) async {
+    try {
+      final (id, _) = await _scan(dev, [dev]);
+      await _connect(id);
+      final value = await _ble.readCharacteristic(QualifiedCharacteristic(
+        characteristicId: Uuid.parse(PlaudProtocol.battLevelCh),
+        serviceId: Uuid.parse(PlaudProtocol.battSvc),
+        deviceId: id,
+      ));
+      return value.isNotEmpty ? value[0] : null;
+    } catch (e) {
+      _log('battery read failed: $e');
+      return null;
+    } finally {
+      await _cleanup();
+    }
+  }
+
   Future<void> _connect(String id) async {
     _set(PlaudStatus.connecting, 'Connecting…');
     final completer = Completer<void>();

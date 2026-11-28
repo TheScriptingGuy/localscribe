@@ -19,6 +19,11 @@ class PlaudProtocol {
   static const chNotify = '00002bb0-0000-1000-8000-00805f9b34fb';
   static const deviceName = 'PLAUD_NOTE';
 
+  // Standard GATT Battery Service — readable without the Plaud handshake or
+  // session key (verified live: read = 0x64 = 100%, findings/plaud-ble-phase5.md).
+  static const battSvc = '0000180f-0000-1000-8000-00805f9b34fb';
+  static const battLevelCh = '00002a19-0000-1000-8000-00805f9b34fb';
+
   // handshake
   // Device key is presented with `20 FE 03 <seq>` (the first-connect/enroll
   // variant captured live; `10 FE 03` is the reconnect variant — both work).

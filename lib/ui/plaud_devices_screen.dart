@@ -17,6 +17,7 @@ import '../models/recording.dart';
 import '../services/ble/plaud_container.dart';
 import '../services/ble/plaud_credentials.dart';
 import '../services/ble/plaud_crypto.dart';
+import '../services/ble/plaud_device.dart';
 import '../services/ble/plaud_import.dart';
 import '../services/library/recording_store.dart';
 import '../services/plaud/plaud_cloud_api.dart';
@@ -46,6 +47,8 @@ class _PlaudDevicesScreenState extends State<PlaudDevicesScreen> {
   String? _error;
   final Set<String> _nearbyIds = {};
   final Set<String> _nearbySerials = {};
+  final Map<String, int?> _battery = {};
+  final Set<String> _checkingBattery = {};
 
   @override
   void dispose() {
@@ -563,6 +566,51 @@ class _PlaudDevicesScreenState extends State<PlaudDevicesScreen> {
     if (mounted) setState(() {});
   }
 
+  Future<void> _checkBattery(PlaudDeviceCred d) async {
+    if (_checkingBattery.contains(d.serial)) return;
+    setState(() => _checkingBattery.add(d.serial));
+    final session = PlaudDeviceSession();
+    try {
+      final level = await session.readBattery(d);
+      if (mounted) setState(() => _battery[d.serial] = level);
+    } finally {
+      session.dispose();
+      if (mounted) setState(() => _checkingBattery.remove(d.serial));
+    }
+  }
+
+  Widget _batteryWidget(PlaudDeviceCred d) {
+    if (_checkingBattery.contains(d.serial)) {
+      return const SizedBox(
+        width: 16,
+        height: 16,
+        child: CircularProgressIndicator(strokeWidth: 2),
+      );
+    }
+    final level = _battery[d.serial];
+    if (level != null) {
+      final low = level <= 15;
+      return Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(low ? Icons.battery_alert : Icons.battery_std,
+              size: 18, color: low ? context.colors.danger : context.colors.muted),
+          const SizedBox(width: 2),
+          Text('$level%',
+              style: TextStyle(color: context.colors.muted, fontSize: 12)),
+        ],
+      );
+    }
+    return IconButton(
+      icon: const Icon(Icons.battery_unknown, size: 18),
+      tooltip: 'Check battery',
+      visualDensity: VisualDensity.compact,
+      padding: EdgeInsets.zero,
+      constraints: const BoxConstraints(),
+      onPressed: () => _checkBattery(d),
+    );
+  }
+
   Widget _deviceCard(PlaudDeviceCred d) {
     final paired = d.publicKey.length == 256 && d.publicKey.any((b) => b != 0);
     final nearby = _nearbySerials.contains(d.serial);
@@ -606,6 +654,10 @@ class _PlaudDevicesScreenState extends State<PlaudDevicesScreen> {
               if (nearby) ...[
                 const SizedBox(width: 6),
                 _badge('Nearby', context.colors.text, context.colors.inverse),
+              ],
+              if (nearby && paired) ...[
+                const SizedBox(width: 6),
+                _batteryWidget(d),
               ],
             ],
           ),
