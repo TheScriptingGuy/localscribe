@@ -4,7 +4,7 @@ import 'dart:typed_data';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter_reactive_ble/flutter_reactive_ble.dart';
-import 'package:wifi_iot/wifi_iot.dart';
+import 'package:localscribe_wifi/localscribe_wifi.dart';
 
 import 'plaud_container.dart';
 import 'plaud_credentials.dart';
@@ -166,12 +166,8 @@ class PlaudDeviceSession extends ChangeNotifier {
       await link.listen();
       _set(PlaudStatus.syncing, 'Joining $ssid…');
       _log('joining $ssid');
-      final joined = await WiFiForIoTPlugin.connect(ssid,
-          password: apPass,
-          security: NetworkSecurity.WPA,
-          joinOnce: true,
-          withInternet: false,
-          timeoutInSeconds: 40);
+      final joined = await LocalscribeWifi.joinAp(ssid, apPass,
+          timeout: const Duration(seconds: 40));
       if (!joined) throw StateError('could not join $ssid');
       _log('joined $ssid');
       _set(PlaudStatus.syncing, 'Waiting for the recorder on WiFi…');
@@ -197,8 +193,7 @@ class PlaudDeviceSession extends ChangeNotifier {
       }
     }
     try {
-      await WiFiForIoTPlugin.disconnect();
-      await WiFiForIoTPlugin.forceWifiUsage(false);
+      await LocalscribeWifi.leaveAp();
     } catch (e) {
       _log('wifi disconnect: $e');
     }

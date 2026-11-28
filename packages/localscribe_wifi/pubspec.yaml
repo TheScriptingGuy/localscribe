@@ -1,0 +1,22 @@
+name: localscribe_wifi
+description: >-
+  Joins the Plaud recorder's local-only WPA2 access point using a native
+  WifiNetworkSpecifier, mirroring the official Plaud app's WifiAgent. Replaces
+  wifi_iot, which did not bind the process to the recorder network.
+version: 0.1.0
+publish_to: none
+
+environment:
+  sdk: ">=3.3.0 <4.0.0"
+  flutter: ">=3.19.0"
+
+dependencies:
+  flutter:
+    sdk: flutter
+
+flutter:
+  plugin:
+    platforms:
+      android:
+        package: ai.localscribe.wifi
+        pluginClass: LocalscribeWifiPlugin
