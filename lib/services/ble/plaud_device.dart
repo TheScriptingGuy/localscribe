@@ -100,7 +100,11 @@ class PlaudDeviceSession extends ChangeNotifier {
           _log('fast transfer unavailable ($e); using Bluetooth');
           await _closeWifi(cmds, null);
           // The recorder drops Bluetooth once its access point is up.
-          if (!_connected) cmds = await _open(cred, dev);
+          if (!_connected) {
+            cmds = await _open(cred, dev);
+            // Switch the access point off now that BLE is back.
+            await _sendClose(cmds);
+          }
         }
       }
       for (final e in todo) {
@@ -126,7 +130,9 @@ class PlaudDeviceSession extends ChangeNotifier {
       _log('ERROR $e');
       _set(PlaudStatus.error, '$e');
     } finally {
-      if (wifi != null) await _closeWifi(cmds, wifi);
+      if (wifi != null) {
+        await _closeWifi(cmds, wifi, cred: cred, dev: dev);
+      }
       await _cleanup();
     }
   }
@@ -179,23 +185,63 @@ class PlaudDeviceSession extends ChangeNotifier {
     }
   }
 
-  /// Leaves fast-transfer mode: closes the link, tells the recorder to turn
-  /// its access point off (BLE op 0x0d, `qi.g`) and drops the phone's
-  /// connection to it.
-  Future<void> _closeWifi(PlaudCommands? cmds, PlaudWifiLink? link) async {
+  /// Leaves fast-transfer mode: closes the link, drops the phone's connection
+  /// to the recorder's access point and tells the recorder to turn the access
+  /// point off (BLE op 0x0d, `qi.g`) — otherwise its blue LED keeps flashing.
+  ///
+  /// The recorder drops Bluetooth while its access point is up, so by the time
+  /// a transfer finishes there is usually no BLE session to send op 0x0d on.
+  /// The official app handles that case too (`closeWiFi: skip BLE cmd (BLE
+  /// dropped during WiFi)`), so when [cred]/[dev] are given we reconnect over
+  /// BLE first and send the close from the new session.
+  ///
+  /// Returns the live command channel (a fresh one if BLE was re-opened),
+  /// or [cmds] unchanged.
+  Future<PlaudCommands?> _closeWifi(PlaudCommands? cmds, PlaudWifiLink? link,
+      {PlaudCredentials? cred, PlaudDeviceCred? dev}) async {
     await link?.close();
-    if (cmds != null && _connected) {
-      try {
-        await _sendCmd(cmds, 0x0d, const []);
-        await _settle();
-      } catch (e) {
-        _log('close wifi: $e');
-      }
-    }
     try {
       await LocalscribeWifi.leaveAp();
     } catch (e) {
       _log('wifi disconnect: $e');
+    }
+    if (link == null) {
+      // The join never succeeded; callers handle BLE themselves.
+      if (cmds != null && _connected) await _sendClose(cmds);
+      return cmds;
+    }
+    var c = cmds;
+    if (c == null || !_connected) {
+      if (cred == null || dev == null) return cmds;
+      _log('BLE dropped during WiFi; reconnecting to close the recorder AP');
+      await _settle(ms: 1500);
+      try {
+        await _notifySub?.cancel();
+        await _connSub?.cancel();
+        _notifySub = _connSub = null;
+        c = await _open(cred, dev);
+      } catch (e) {
+        _log('close wifi: could not reconnect over BLE ($e)');
+        return cmds;
+      }
+    }
+    if (c == null) return cmds;
+    await _sendClose(c);
+    return c;
+  }
+
+  /// BLE op 0x0d (CloseWiFi): waits briefly for the recorder's ack and retries
+  /// once if it doesn't come.
+  Future<void> _sendClose(PlaudCommands cmds) async {
+    for (var attempt = 1; attempt <= 2; attempt++) {
+      try {
+        final r = await _request(cmds, 0x0d, const [],
+            timeout: const Duration(seconds: 4));
+        _log('close wifi reply ${_hex(r)}');
+        return;
+      } catch (e) {
+        _log('close wifi attempt $attempt: $e');
+      }
     }
   }
 
